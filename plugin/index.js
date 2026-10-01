@@ -8,7 +8,10 @@ const MAIN_FIELDS = ["mode", "prompt"]; // auto-saved as you use them
 const SETTINGS = ["pad", "stuck", "url", "comfyDir", "model", "clip", "vae", "steps", "colorMatch"]; // saved with the Save button
 const CLIENT = "ps_clean_" + Date.now();
 const SRGB = "sRGB IEC61966-2.1";
-const jobs = []; // newest first. Results live only in memory: gone when Photoshop closes.
+// newest first; every result of this Photoshop session (memory only, gone when Photoshop closes).
+// ponytail: each result keeps its PNG as a data URL (~1-3 MB); a very long session grows memory, Clear frees it
+const jobs = [];
+let filter = "all"; // results filter: all | new | applied
 let preview = null; // { job, docId, layerId } -- the result currently shown in its document
 let jobSeq = 0;
 let ws = null;
@@ -188,7 +191,7 @@ async function clean() {
   const rect = edit ? clampRect(sel, doc)
     : clampRect({ left: 0, right: doc.width, top: sel.top - pad, bottom: sel.bottom + pad }, doc);
   const job = {
-    id: `ps_clean_${Date.now()}_${++jobSeq}`, docId: doc.id, docName: doc.title, base: baseUrl(),
+    id: `ps_clean_${Date.now()}_${++jobSeq}`, docId: doc.id, docName: doc.title, base: baseUrl(), time: new Date(),
     prompt: $("prompt").value.trim(), edit, rect, w: rect.right - rect.left, h: rect.bottom - rect.top, state: "reading",
   };
   jobs.unshift(job);
@@ -240,8 +243,8 @@ async function clean() {
     job.retries = 0;
     await submit(job, false);
     const img = await waitResult(job);
-    job.png = new Uint8Array(await (await fetch(`${job.base}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder)}&type=${img.type}`)).arrayBuffer());
-    job.thumb = "data:image/png;base64," + b64encode(job.png);
+    const png = new Uint8Array(await (await fetch(`${job.base}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder)}&type=${img.type}`)).arrayBuffer());
+    job.thumb = "data:image/png;base64," + b64encode(png); // the only copy; decoded again for previews
     job.state = "ready";
     status("Result ready. Click it to preview.");
   } catch (e) {
@@ -298,14 +301,60 @@ async function comfyCommand(dir) {
   throw new Error(`No ComfyUI found in "${dir}". Pick the ComfyUI_windows_portable folder (or the folder with main.py).`);
 }
 
-// no browser tab (--disable-auto-launch, no --windows-standalone-build), console window minimized (Run style 7)
+// No browser tab (--disable-auto-launch, no --windows-standalone-build). Runs in Windows Terminal when it's
+// installed (minimized: Terminal ignores the start-minimized flag, so the script minimizes its window),
+// otherwise in the classic console, minimized. VBS -> hidden PowerShell, so no extra window flashes.
 async function startComfy(dir, base) {
   conn(false, "Starting ComfyUI...");
   const c = await comfyCommand(dir);
+  const sq = (str) => str.replace(/'/g, "''");
+  const pyArgs = `${c.flags} "${c.main}" --disable-auto-launch`.trim();
+  const ps1 = `$dir = '${sq(c.cwd)}'
+$py = '${sq(c.python)}'
+$pyArgs = '${sq(pyArgs)}'
+$title = 'ComfyUI (Comfy Clean)'
+$wt = Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps\\wt.exe'
+if (Test-Path $wt) {
+  Add-Type @"
+using System; using System.Runtime.InteropServices; using System.Text;
+public class CCWin {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  public static IntPtr Find(string title) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((h, l) => {
+      var t = new StringBuilder(256); var c = new StringBuilder(256);
+      GetWindowText(h, t, 256); GetClassName(h, c, 256);
+      if (IsWindowVisible(h) && c.ToString() == "CASCADIA_HOSTING_WINDOW_CLASS" && t.ToString() == title) { found = h; return false; }
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
+}
+"@
+  Start-Process $wt -ArgumentList "-w new --title \`"$title\`" --suppressApplicationTitle -d \`"$dir\`" \`"$py\`" $pyArgs"
+  # Terminal re-shows its window while it finishes starting, so keep minimizing until it stays down
+  $h = [IntPtr]::Zero; $down = 0
+  for ($i = 0; $i -lt 80 -and $down -lt 8; $i++) {
+    Start-Sleep -Milliseconds 250
+    if ($h -eq [IntPtr]::Zero) { $h = [CCWin]::Find($title) }
+    if ($h -ne [IntPtr]::Zero) { if ([CCWin]::IsIconic($h)) { $down++ } else { $down = 0; [void][CCWin]::ShowWindow($h, 6) } }
+  }
+} else {
+  Start-Process $py -ArgumentList $pyArgs -WorkingDirectory $dir -WindowStyle Minimized
+}
+`;
+  const data = await fs.getDataFolder();
+  const ps1File = await data.createFile("start_comfyui.ps1", { overwrite: true });
+  await ps1File.write(ps1.replace(/\n/g, "\r\n"));
+  const vbs = await data.createFile("start_comfyui.vbs", { overwrite: true });
   const q = (str) => str.replace(/"/g, '""');
-  const line = `"${c.python}" ${c.flags} "${c.main}" --disable-auto-launch`;
-  const vbs = await (await fs.getDataFolder()).createFile("start_comfyui.vbs", { overwrite: true });
-  await vbs.write(`Set sh = CreateObject("WScript.Shell")\r\nsh.CurrentDirectory = "${q(c.cwd)}"\r\nsh.Run "${q(line)}", 7, False\r\n`);
+  await vbs.write(`Set sh = CreateObject("WScript.Shell")\r\nsh.Run "${q(`powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${ps1File.nativePath}"`)}", 0, False\r\n`);
   const err = await uxp.shell.openPath(vbs.nativePath, "Starts ComfyUI minimized so Comfy Clean can use it.");
   if (err) throw new Error("Couldn't start ComfyUI: " + err);
   for (let t = 0; t < 180; t += 2) {
@@ -413,7 +462,7 @@ async function showPreview(job) {
   status("Placing preview...");
 
   const tmp = await (await fs.getTemporaryFolder()).createFile(job.id + ".png", { overwrite: true });
-  await tmp.write(job.png.buffer, { format: formats.binary });
+  await tmp.write(b64decode(job.thumb).buffer, { format: formats.binary });
   try {
     await modal(async (ctx) => {
       if (app.activeDocument.id !== doc.id) app.activeDocument = doc; // always the document the selection came from
@@ -460,18 +509,21 @@ async function applyPreview() {
   const p = preview;
   await modal(() => play([{ _obj: "set", _target: layerRef(p), to: { _obj: "layer", name: "Clean: " + p.job.prompt.slice(0, 40) } }]));
   preview = null;
-  removeJob(p.job);
+  p.job.outcome = "applied";
+  render();
   status("Applied.");
 }
 
-async function discardPreview(dropJob) {
+// byUser: the Discard button (marks the result); otherwise just swapping to another preview
+async function discardPreview(byUser) {
   if (!preview) return;
   const p = preview;
   preview = null;
   if (findDoc(p.docId)) {
     try { await modal(() => play([{ _obj: "delete", _target: layerRef(p) }])); } catch (e) {} // user may have deleted it already
   }
-  if (dropJob) { removeJob(p.job); status("Discarded."); } else render();
+  if (byUser) { p.job.outcome = "discarded"; status("Discarded. It stays in Results if you change your mind."); }
+  render();
 }
 
 // ---------- UI ----------
@@ -510,6 +562,9 @@ function renderPresets() {
   render();
 }
 
+const finished = (j) => j.state === "ready" || j.state === "error";
+const pad2 = (n) => String(n).padStart(2, "0");
+
 function render() {
   const edit = $("mode").value === "edit";
   for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === $("mode").value ? "on" : "";
@@ -522,23 +577,35 @@ function render() {
   }
   $("previewBar").className = "preview-bar" + (preview ? "" : " hidden");
   $("count").textContent = jobs.length;
+  $("sessionStats").textContent = jobs.length
+    ? `${jobs.filter((j) => j.outcome === "applied").length} applied \u00b7 ${jobs.filter((j) => !finished(j)).length} running`
+    : "";
+  for (const f of document.querySelectorAll("#filters div")) f.className = f.dataset.f === filter ? "on" : "";
 
+  const shown = jobs.filter((j) => filter === "all" || (filter === "applied" ? j.outcome === "applied" : !j.outcome));
   const box = $("jobs");
   box.innerHTML = "";
-  if (!jobs.length) box.appendChild(el("div", "empty", "Results show up here. Click one to preview it in place."));
-  for (const job of jobs) {
+  if (!shown.length) {
+    box.appendChild(el("div", "empty", jobs.length ? "Nothing here with this filter." : "Every result of this Photoshop session shows up here. Click one to preview it in place."));
+  }
+  for (const job of shown) {
     const active = preview && preview.job === job;
-    const row = el("div", "job" + (job.state === "ready" ? " ready" : "") + (active ? " active" : ""));
+    const row = el("div", "job" + (job.state === "ready" ? " ready" : "") + (active ? " active" : "") + (job.outcome ? " " + job.outcome : ""));
     if (job.thumb) { const img = el("img", "thumb"); img.src = job.thumb; row.appendChild(img); }
-    else row.appendChild(el("div", "thumb"));
+    else row.appendChild(el("div", "thumb" + (job.state === "error" ? "" : " pending")));
 
     const txt = el("div", "txt");
-    const title = el("div", "title");
-    title.appendChild(el("span", "tag", job.edit ? "EDIT" : "CLEAN"));
-    title.appendChild(document.createTextNode(job.prompt));
-    txt.appendChild(title);
-    txt.appendChild(el("div", "sub" + (job.state === "error" ? " err" : job.state === "ready" ? " okc" : ""), job.docName + " \u00b7 " + stateText(job)));
-    if (!["ready", "error"].includes(job.state)) {
+    const top = el("div", "top");
+    top.appendChild(el("span", "tag" + (job.edit ? " edit" : ""), job.edit ? "EDIT" : "CLEAN"));
+    top.appendChild(el("span", "doc", job.docName));
+    top.appendChild(el("span", "time", `${pad2(job.time.getHours())}:${pad2(job.time.getMinutes())}`));
+    txt.appendChild(top);
+    txt.appendChild(el("div", "title", job.prompt));
+    const pill = pillFor(job, active);
+    const bottom = el("div", "bottom");
+    bottom.appendChild(el("span", "pill " + pill.cls, pill.text));
+    txt.appendChild(bottom);
+    if (!finished(job)) {
       const bar = el("div", "bar"), fill = el("div");
       const [v, m] = (job.progress || "0/1").split("/").map(Number);
       fill.style.width = (job.state === "running" ? Math.max(4, Math.round(100 * v / m)) : 0) + "%";
@@ -547,11 +614,11 @@ function render() {
     row.appendChild(txt);
 
     const x = el("div", "x", "\u2715");
-    x.title = job.state === "ready" || job.state === "error" ? "Remove" : "Cancel";
+    x.title = finished(job) ? "Remove from list" : "Cancel";
     x.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (active) discardPreview(true).catch(fail);
-      else if (job.state === "ready" || job.state === "error") removeJob(job);
+      if (active) discardPreview(false).then(() => removeJob(job)).catch(fail);
+      else if (finished(job)) removeJob(job);
       else cancelJob(job).catch(fail);
     });
     row.appendChild(x);
@@ -560,15 +627,31 @@ function render() {
   }
 }
 
+function pillFor(job, active) {
+  if (active) return { cls: "blue", text: "Previewing" };
+  if (job.state === "error") return { cls: "red", text: "Error: " + job.error };
+  if (job.state === "ready") {
+    if (job.outcome === "applied") return { cls: "green", text: "Applied \u00b7 click to place again" };
+    if (job.outcome === "discarded") return { cls: "grey", text: "Discarded \u00b7 click to preview" };
+    return { cls: "green", text: "Ready \u00b7 click to preview" };
+  }
+  return { cls: job.state === "retrying" ? "amber" : "blue", text: stateText(job) };
+}
+
+for (const f of document.querySelectorAll("#filters div")) f.addEventListener("click", () => { filter = f.dataset.f; render(); });
+$("clearDone").addEventListener("click", () => {
+  for (const j of jobs.filter((j) => finished(j) && !(preview && preview.job === j))) removeJob(j);
+  status("Cleared finished results.");
+});
+
 function stateText(job) {
-  if (job.cancelled) return "cancelling...";
-  if (job.state === "starting") return "starting ComfyUI...";
-  if (job.state === "queued") return job.queuePos ? `queued #${job.queuePos}` : "queued";
-  if (job.state === "retrying") return `stuck, retrying (${job.retries}/2)...`;
-  if (job.state === "running") return job.progress ? `step ${job.progress}` : "running...";
-  if (job.state === "ready") return preview && preview.job === job ? "previewing" : "ready \u00b7 click to preview";
-  if (job.state === "error") return "error: " + job.error;
-  return job.state + "..." + (job.retries ? ` (retry ${job.retries})` : "");
+  if (job.cancelled) return "Cancelling...";
+  if (job.state === "starting") return "Starting ComfyUI...";
+  if (job.state === "queued") return job.queuePos ? `Queued #${job.queuePos}` : "Queued";
+  if (job.state === "retrying") return `Stuck, retrying (${job.retries}/2)...`;
+  if (job.state === "running") return job.progress ? `Step ${job.progress}` : "Running...";
+  const s = job.state.charAt(0).toUpperCase() + job.state.slice(1);
+  return s + "..." + (job.retries ? ` (retry ${job.retries})` : "");
 }
 render();
 

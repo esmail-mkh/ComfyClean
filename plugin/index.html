@@ -6,152 +6,215 @@
   :root {
     --text: var(--uxp-host-text-color, #e6e6e6);
     --muted: rgba(255, 255, 255, 0.55);
-    --card: rgba(255, 255, 255, 0.05);
-    --card-hover: rgba(255, 255, 255, 0.09);
-    --line: rgba(255, 255, 255, 0.10);
-    --accent: #378ef0;
-    --accent-soft: rgba(55, 142, 240, 0.18);
-    --ok: #2fb67c;
-    --warn: #e8a33d;
-    --err: #ec5b62;
+    --faint: rgba(255, 255, 255, 0.35);
+    --card: rgba(255, 255, 255, 0.045);
+    --card-hover: rgba(255, 255, 255, 0.085);
+    --line: rgba(255, 255, 255, 0.09);
+    --accent: #4b8ef5;
+    --accent-2: #8a6cf0;
+    --accent-soft: rgba(75, 142, 245, 0.16);
+    --ok: #34c486;
+    --ok-soft: rgba(52, 196, 134, 0.15);
+    --warn: #eaa53e;
+    --warn-soft: rgba(234, 165, 62, 0.16);
+    --err: #ef5f67;
+    --err-soft: rgba(239, 95, 103, 0.15);
   }
   @media (prefers-color-scheme: light), (prefers-color-scheme: lightest) {
     :root {
       --muted: rgba(0, 0, 0, 0.55);
-      --card: rgba(0, 0, 0, 0.04);
-      --card-hover: rgba(0, 0, 0, 0.08);
-      --line: rgba(0, 0, 0, 0.12);
-      --accent-soft: rgba(55, 142, 240, 0.14);
+      --faint: rgba(0, 0, 0, 0.35);
+      --card: rgba(0, 0, 0, 0.035);
+      --card-hover: rgba(0, 0, 0, 0.07);
+      --line: rgba(0, 0, 0, 0.10);
+      --accent-soft: rgba(75, 142, 245, 0.13);
     }
   }
 
-  body { color: var(--text); font-size: 12px; padding: 10px 12px 14px; margin: 0; }
+  body { color: var(--text); font-size: 12px; padding: 12px 12px 10px; margin: 0; }
   .row { display: flex; align-items: center; }
   .grow { flex: 1; }
-  .muted { color: var(--muted); }
+  .sp { width: 8px; }
+  .hidden { display: none; }
 
-  header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
-  .brand { font-size: 14px; font-weight: bold; letter-spacing: 0.3px; }
-  .conn { display: flex; align-items: center; font-size: 11px; color: var(--muted); }
-  .dot { width: 8px; height: 8px; border-radius: 4px; margin-right: 6px; background: var(--warn); }
+  /* header */
+  header { display: flex; align-items: center; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .logo { width: 30px; height: 30px; border-radius: 9px; margin-right: 9px; text-align: center; line-height: 30px; font-size: 15px; font-weight: bold; color: #fff;
+          background: var(--accent); background-image: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .brand { font-size: 14px; font-weight: bold; letter-spacing: 0.2px; }
+  .tagline { margin-top: 1px; font-size: 10px; color: var(--faint); }
+  .conn { display: flex; align-items: center; padding: 3px 8px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); font-size: 10px; color: var(--muted); }
+  .dot { width: 7px; height: 7px; border-radius: 4px; margin-right: 6px; background: var(--warn); }
   .dot.ok { background: var(--ok); }
   .dot.off { background: var(--err); }
+  .icon { width: 26px; height: 26px; margin-left: 6px; border-radius: 13px; text-align: center; line-height: 26px; font-size: 15px; color: var(--muted); }
+  .icon:hover { background: var(--card-hover); color: var(--text); }
 
-  .seg { display: flex; padding: 2px; border-radius: 6px; background: var(--card); border: 1px solid var(--line); }
-  .seg div { flex: 1; text-align: center; padding: 6px 0; border-radius: 4px; color: var(--muted); font-weight: bold; }
+  /* blocks */
+  .card { padding: 10px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
+  .label { margin: 0 0 7px; font-size: 10px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+  .section { margin-top: 14px; }
+
+  .seg { display: flex; padding: 3px; border-radius: 9px; background: var(--card); border: 1px solid var(--line); }
+  .seg div { flex: 1; text-align: center; padding: 7px 0; border-radius: 6px; color: var(--muted); font-weight: bold; }
   .seg div:hover { color: var(--text); }
-  .seg div.on { background: var(--accent); color: #fff; }
-  .hint { margin: 6px 2px 0; font-size: 11px; color: var(--muted); }
+  .seg div.on { color: #fff; background: var(--accent); background-image: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .hint { margin: 7px 2px 0; font-size: 11px; color: var(--muted); }
   .hint.err { color: var(--err); }
 
-  .label { margin: 14px 0 6px; font-size: 10px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
   .chips { display: flex; flex-wrap: wrap; margin: -2px; }
-  .chip { margin: 2px; padding: 4px 9px; border-radius: 11px; border: 1px solid var(--line); background: var(--card); font-size: 11px; }
+  .chip { margin: 2px; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); font-size: 11px; }
   .chip:hover { background: var(--card-hover); }
-  .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
-  .chip .del { display: none; margin-left: 5px; color: var(--muted); }
+  .chip.on { border-color: var(--accent); background: var(--accent-soft); }
+  .chip .del { display: none; margin-left: 6px; color: var(--muted); }
   .chip:hover .del { display: inline; }
   .chip .del:hover { color: var(--err); }
-  .chip.add { padding: 4px 10px; color: var(--muted); border-style: dashed; }
-  .preset-add { margin-top: 8px; padding: 8px; border-radius: 6px; background: var(--card); border: 1px solid var(--line); }
+  .chip.add { color: var(--muted); border-style: dashed; }
+  .preset-add { margin-top: 8px; padding: 8px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
   .preset-add .row { margin-top: 6px; }
   .preset-add sp-button { flex: 1; }
-  .preset-add .sp { width: 8px; }
-  textarea { width: 100%; height: 56px; margin-top: 8px; }
+  textarea { width: 100%; height: 64px; margin-top: 9px; }
   select, input { width: 100%; }
+  sp-button { width: 100%; }
 
   .go { margin-top: 12px; }
-  sp-button { width: 100%; }
-  .status { margin-top: 8px; min-height: 14px; font-size: 11px; color: var(--muted); }
+  .btn { padding: 9px 0; border-radius: 9px; text-align: center; font-weight: bold; letter-spacing: 0.3px; }
+  .btn.primary { color: #fff; background: var(--accent); background-image: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .btn.primary:hover { background-image: linear-gradient(135deg, #5d9bf7, #9a80f3); }
+  .btn.primary.big { padding: 11px 0; font-size: 13px; }
+  .btn.ghost { color: var(--text); background: var(--card-hover); border: 1px solid var(--line); }
+  .btn.ghost:hover { border-color: var(--muted); }
+  .btn-row .btn { flex: 1; }
+  .status { margin-top: 7px; min-height: 14px; font-size: 11px; color: var(--muted); }
   .status.err { color: var(--err); }
 
-  .preview-bar { margin-top: 10px; padding: 10px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent-soft); }
-  .preview-bar .pv { font-weight: bold; margin-bottom: 8px; }
+  .preview-bar { margin-top: 10px; padding: 10px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent-soft); }
+  .preview-bar .pv { font-weight: bold; margin-bottom: 2px; }
+  .preview-bar .pv-sub { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
   .preview-bar sp-button { flex: 1; }
-  .preview-bar .sp { width: 8px; }
 
-  .count { margin-left: 6px; padding: 0 6px; border-radius: 7px; background: var(--card-hover); font-size: 10px; }
-  .empty { padding: 14px; text-align: center; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); font-size: 11px; }
-  .job { display: flex; align-items: center; padding: 6px; margin-bottom: 6px; border-radius: 6px; background: var(--card); border: 1px solid transparent; }
+  /* results */
+  .results-head { display: flex; align-items: center; margin-bottom: 7px; }
+  .results-head .label { margin: 0; }
+  .count { margin-left: 6px; padding: 0 6px; border-radius: 7px; background: var(--card-hover); font-size: 10px; color: var(--muted); }
+  .filters { display: flex; padding: 2px; border-radius: 7px; background: var(--card); border: 1px solid var(--line); }
+  .filters div { padding: 2px 8px; border-radius: 5px; font-size: 10px; color: var(--muted); }
+  .filters div:hover { color: var(--text); }
+  .filters div.on { background: var(--card-hover); color: var(--text); font-weight: bold; }
+  .link { margin-left: 8px; font-size: 10px; color: var(--muted); }
+  .link:hover { color: var(--err); }
+  .stats { margin: -2px 0 7px; font-size: 10px; color: var(--faint); }
+
+  .empty { padding: 18px 12px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 11px; }
+  .job { display: flex; align-items: center; padding: 7px; margin-bottom: 6px; border-radius: 10px; background: var(--card); border: 1px solid transparent; }
   .job.ready:hover { background: var(--card-hover); border-color: var(--line); }
   .job.active { border-color: var(--accent); background: var(--accent-soft); }
-  .thumb { width: 52px; height: 38px; margin-right: 8px; border-radius: 4px; background: var(--card-hover); }
+  .job.discarded { opacity: 0.6; }
+  .thumb { width: 64px; height: 48px; margin-right: 9px; border-radius: 7px; background: var(--card-hover); object-fit: cover; }
+  .thumb.pending { background: var(--accent-soft); }
   .job .txt { flex: 1; overflow: hidden; }
-  .job .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .job .sub { margin-top: 2px; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .job .sub.err { color: var(--err); white-space: normal; }
-  .job .sub.okc { color: var(--ok); }
-  .tag { padding: 0 5px; margin-right: 4px; border-radius: 3px; font-size: 9px; font-weight: bold; background: var(--card-hover); color: var(--muted); }
-  .bar { height: 3px; margin-top: 5px; border-radius: 2px; background: var(--line); overflow: hidden; }
-  .bar div { height: 3px; background: var(--accent); }
-  .x { width: 22px; height: 22px; margin-left: 6px; border-radius: 11px; text-align: center; line-height: 22px; color: var(--muted); }
+  .job .top { display: flex; align-items: center; }
+  .tag { padding: 0 5px; margin-right: 6px; border-radius: 4px; font-size: 9px; font-weight: bold; letter-spacing: 0.4px; background: var(--accent-soft); color: var(--accent); }
+  .tag.edit { background: rgba(138, 108, 240, 0.18); color: var(--accent-2); }
+  .doc { flex: 1; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .time { margin-left: 6px; font-size: 10px; color: var(--faint); }
+  .job .title { margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job .bottom { margin-top: 4px; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 8px; font-size: 10px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pill.green { background: var(--ok-soft); color: var(--ok); }
+  .pill.blue { background: var(--accent-soft); color: var(--accent); }
+  .pill.amber { background: var(--warn-soft); color: var(--warn); }
+  .pill.red { background: var(--err-soft); color: var(--err); white-space: normal; }
+  .pill.grey { background: var(--card-hover); color: var(--muted); }
+  .bar { height: 3px; margin-top: 6px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .bar div { height: 3px; background: var(--accent); background-image: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .x { width: 22px; height: 22px; margin-left: 6px; border-radius: 11px; text-align: center; line-height: 22px; color: var(--faint); }
   .x:hover { background: var(--card-hover); color: var(--err); }
 
-  .icon { width: 24px; height: 24px; margin-left: 6px; border-radius: 12px; text-align: center; line-height: 24px; font-size: 15px; color: var(--muted); }
-  .icon:hover { background: var(--card-hover); color: var(--text); }
+  /* settings */
   .page-head { display: flex; align-items: center; padding-bottom: 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
   .page-head .icon { margin: 0 6px 0 0; }
   .page-title { font-size: 14px; font-weight: bold; }
-  .group { margin-bottom: 6px; }
-  .field { margin-top: 10px; }
+  .group { margin-top: 12px; }
+  .field { margin-top: 9px; }
   .field .k { margin-bottom: 4px; font-size: 11px; color: var(--muted); }
   .pair { display: flex; }
   .pair .field { flex: 1; }
-  .pair .sp { width: 8px; }
-  .hidden { display: none; }
+  .about { display: flex; align-items: center; }
+  .about .name { font-weight: bold; }
+  .about .meta { margin-top: 2px; font-size: 10px; color: var(--muted); }
+
+  footer { margin-top: 16px; padding-top: 9px; border-top: 1px solid var(--line); text-align: center; font-size: 10px; color: var(--faint); }
+  footer b, .credit { color: var(--text); font-weight: bold; letter-spacing: 0.3px; }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <div class="brand">Comfy Clean</div>
-    <div class="row">
-      <div class="conn"><div class="dot" id="dot"></div><span id="connText">Connecting...</span></div>
-      <div class="icon" id="gear" title="Settings">&#9881;</div>
+    <div class="logo">C</div>
+    <div class="grow">
+      <div class="brand">Comfy Clean</div>
+      <div class="tagline">AI clean &amp; edit for manhwa, powered by ComfyUI</div>
     </div>
+    <div class="conn"><div class="dot" id="dot"></div><span id="connText">Connecting...</span></div>
+    <div class="icon" id="gear" title="Settings">&#9881;</div>
   </header>
 
   <div id="mainView">
-
-  <div class="seg" id="modeSeg">
-    <div data-v="clean">Clean</div>
-    <div data-v="edit">Edit</div>
-  </div>
-  <input id="mode" class="hidden" value="clean">
-  <div class="hint" id="modeHint"></div>
-
-  <div class="label">Prompt</div>
-  <div class="chips" id="presets"></div>
-  <div id="presetAdd" class="preset-add hidden">
-    <input id="presetName" placeholder="Name for the current prompt">
-    <div class="row">
-      <sp-button id="presetSave" variant="cta">Save preset</sp-button>
-      <div class="sp"></div>
-      <sp-button id="presetCancel" variant="secondary">Cancel</sp-button>
+    <div class="seg" id="modeSeg">
+      <div data-v="clean">Clean</div>
+      <div data-v="edit">Edit</div>
     </div>
-  </div>
-  <textarea id="prompt" placeholder="Describe what to do with the selection"></textarea>
+    <input id="mode" class="hidden" value="clean">
+    <div class="hint" id="modeHint"></div>
 
-  <div class="go"><sp-button id="go" variant="cta">Clean selection</sp-button></div>
-  <div class="status" id="status"></div>
-
-  <div id="previewBar" class="preview-bar hidden">
-    <div class="pv">Previewing in document</div>
-    <div class="row">
-      <sp-button id="apply" variant="cta">Apply</sp-button>
-      <div class="sp"></div>
-      <sp-button id="discard" variant="secondary">Discard</sp-button>
+    <div class="card section">
+      <div class="label">Prompt</div>
+      <div class="chips" id="presets"></div>
+      <div id="presetAdd" class="preset-add hidden">
+        <input id="presetName" placeholder="Name for the current prompt">
+        <div class="row">
+          <sp-button id="presetSave" variant="cta">Save preset</sp-button>
+          <div class="sp"></div>
+          <sp-button id="presetCancel" variant="secondary">Cancel</sp-button>
+        </div>
+      </div>
+      <textarea id="prompt" placeholder="Describe what to do with the selection"></textarea>
     </div>
-  </div>
 
-  <div class="label row">Results<span class="count" id="count">0</span></div>
-  <div id="jobs"></div>
+    <div class="go"><div class="btn primary big" id="go">Clean selection</div></div>
+    <div class="status" id="status"></div>
 
+    <div id="previewBar" class="preview-bar hidden">
+      <div class="pv">Previewing in document</div>
+      <div class="pv-sub">Apply keeps the layer. Discard removes it; the result stays in Results.</div>
+      <div class="row btn-row">
+        <div class="btn primary" id="apply">Apply</div>
+        <div class="sp"></div>
+        <div class="btn ghost" id="discard">Discard</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="results-head">
+        <div class="label">Results</div><span class="count" id="count">0</span>
+        <div class="grow"></div>
+        <div class="filters" id="filters">
+          <div data-f="all">All</div>
+          <div data-f="new">New</div>
+          <div data-f="applied">Applied</div>
+        </div>
+        <div class="link" id="clearDone" title="Remove finished results from the list">Clear</div>
+      </div>
+      <div class="stats" id="sessionStats"></div>
+      <div id="jobs"></div>
+    </div>
   </div>
 
   <div id="settingsView" class="hidden">
     <div class="page-head"><div class="icon" id="back" title="Back">&#8592;</div><div class="page-title">Settings</div></div>
-    <div class="group">
+
+    <div class="group card">
       <div class="label">Generation</div>
       <div class="field"><div class="k">Model</div><select id="model"></select></div>
       <div class="field"><div class="k">Text encoder</div><select id="clip"></select></div>
@@ -168,7 +231,8 @@
         <div class="field"><div class="k">Auto-retry after (s/step, 0 = off)</div><input id="stuck" type="number" value="30"></div>
       </div>
     </div>
-    <div class="group">
+
+    <div class="group card">
       <div class="label">Connection</div>
       <div class="field"><div class="k">ComfyUI URL</div><input id="url" value="http://127.0.0.1:8188"></div>
       <div class="field">
@@ -181,9 +245,21 @@
       </div>
       <div class="field"><sp-button id="reload" variant="secondary">Test connection</sp-button></div>
     </div>
-    <div class="field"><sp-button id="saveSettings" variant="cta">Save</sp-button></div>
+
+    <div class="field group"><sp-button id="saveSettings" variant="cta">Save</sp-button></div>
     <div class="status" id="saveMsg"></div>
+
+    <div class="group card about">
+      <div class="logo">C</div>
+      <div>
+        <div class="name">Comfy Clean 1.1.0</div>
+        <div class="meta">Designed by <span class="credit">E.MKH</span></div>
+        <div class="meta">Flux.2 Klein, Flux.1 Kontext &amp; Fill through ComfyUI</div>
+      </div>
+    </div>
   </div>
+
+  <footer>Comfy Clean &middot; designed by <b>E.MKH</b></footer>
 </div>
 <script src="index.js"></script>
 </body>
