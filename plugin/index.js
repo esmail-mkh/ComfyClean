@@ -16,6 +16,7 @@ const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const jobs = [];
 let filter = "all"; // results filter: all | new | applied
 let preview = null; // { job, docId, layerId } -- the result currently shown in its document
+let placing = false; // a preview is being placed right now
 let jobSeq = 0;
 let ws = null;
 let objectInfo = null; // ComfyUI /object_info, cached by loadModels
@@ -110,6 +111,7 @@ async function start() {
   cfgReady = true;
   if (cfg.panelOpen !== false) showPanel();
   fillFields(MAIN_FIELDS.concat(SETTINGS));
+  fillChecks();
   showSavedPicks();
   if (!$("prompt").value) $("prompt").value = presets()[0] ? presets()[0].prompt : "";
   renderPresets();
@@ -159,9 +161,12 @@ const showSettings = (on) => {
 };
 $("gear").addEventListener("click", () => showSettings(true));
 $("modelLine").addEventListener("click", () => showSettings(true));
-$("back").addEventListener("click", () => { fillFields(SETTINGS); showSettings(false); });
+const fillChecks = () => { $("legacy").checked = !!cfg.legacy; $("autoPreview").checked = cfg.autoPreview !== false; }; // auto preview: on unless turned off
+$("back").addEventListener("click", () => { fillFields(SETTINGS); fillChecks(); showSettings(false); });
 $("saveSettings").addEventListener("click", async () => {
   for (const f of SETTINGS) cfg[f] = val(f);
+  cfg.legacy = !!$("legacy").checked;
+  cfg.autoPreview = !!$("autoPreview").checked;
   try {
     await writeCfg();
     await loadModels();
@@ -282,7 +287,7 @@ async function loadTemplates() {
 async function clean() {
   const doc = app.activeDocument;
   if (!doc) throw new Error("No document open.");
-  const sel = doc.selection.bounds;
+  const sel = await selectionBounds(doc);
   if (!sel) throw new Error("Make a selection first.");
 
   const edit = $("mode").value === "edit";
@@ -300,8 +305,9 @@ async function clean() {
   render();
 
   try {
-    let jpeg;
+    let jpeg, maskBytes;
     await modal(async (ctx) => {
+      if (legacy()) return ({ jpeg, mask: maskBytes } = await legacyRead(ctx, doc, job));
       // everything here is rolled back at the end: no history entry, preview layer comes back
       const sid = await ctx.hostControl.suspendHistory({ documentID: doc.id, name: "Comfy Clean read" });
       try {
@@ -334,7 +340,7 @@ async function clean() {
     job.state = "uploading"; render();
     // template node ids: 4 = image, 20 = mask (clean templates only)
     wf["4"].inputs.image = await upload(job.base, job.id + ".jpg", jpeg);
-    if (wf["20"]) wf["20"].inputs.image = await upload(job.base, job.id + "_mask.jpg", await maskJpeg(job));
+    if (wf["20"]) wf["20"].inputs.image = await upload(job.base, job.id + "_mask.jpg", maskBytes || await maskJpeg(job));
     if (job.cancelled) throw new Error("Cancelled");
 
     connectWs(job.base);
@@ -354,6 +360,16 @@ async function clean() {
   } finally {
     render();
   }
+  if (job.state === "ready") await autoPreview(job);
+}
+
+// a new result is shown in the document right away (Apply / Discard), unless another result is on screen
+// or being placed, or the user moved to another document; then it waits in the list as "Ready"
+async function autoPreview(job) {
+  let active = null;
+  try { active = app.activeDocument; } catch (e) {} // no document open
+  if (cfg.autoPreview === false || preview || placing || !active || active.id !== job.docId) return;
+  await showPreview(job).catch(() => status("Result ready. Click it to preview.")); // e.g. Photoshop busy in a dialog
 }
 
 // ---------- starting ComfyUI ----------
@@ -465,6 +481,87 @@ public class CCWin {
   throw new Error("ComfyUI didn't come up within 3 minutes. Check its window (taskbar) for errors.");
 }
 
+// ---------- selection helpers, and the Photoshop 2022 path ----------
+// The Imaging API (pixels and selections as data) arrived in Photoshop 24.2 (2023), document.selection in 25 (2024).
+// Without it (or with "Photoshop 2022 mode" on in Settings), the same work goes through channels, a duplicate and files.
+
+const legacy = () => !(imaging && imaging.getSelection && imaging.putPixels) || !!cfg.legacy;
+const SEL = { _ref: "channel", _property: "selection" };
+const SELECT_ALL = { _obj: "set", _target: [SEL], to: { _enum: "ordinal", _value: "allEnum" } };
+const px = (v) => ({ _unit: "pixelsUnit", _value: v });
+const loadChannel = (name) => ({ _obj: "set", _target: [SEL], to: { _ref: "channel", _name: name } });
+const fillWith = (c) => ({ _obj: "fill", using: { _enum: "fillContents", _value: c }, opacity: { _unit: "percentUnit", _value: 100 }, mode: { _enum: "blendMode", _value: "normal" } });
+
+// bounds of the active selection in pixels, or null (works in every version, unlike doc.selection)
+async function selectionBounds(doc) {
+  try {
+    const [r] = await play([{ _obj: "get", _target: [{ _property: "selection" }, { _ref: "document", _id: doc.id }] }]);
+    const s = r && r.selection;
+    if (!s || !s.right) return null;
+    return { left: s.left._value, top: s.top._value, right: s.right._value, bottom: s.bottom._value };
+  } catch (e) { return null; }
+}
+
+// remembers the current selection; the returned function puts it back (or deselects when there was none)
+async function keepSelection(doc) {
+  const r = await selectionBounds(doc);
+  if (!r) return deselect;
+  if (legacy()) {
+    const name = "Comfy Clean tmp";
+    await play([{ _obj: "duplicate", _target: [SEL], name }]);
+    return () => play([loadChannel(name), { _obj: "delete", _target: [{ _ref: "channel", _name: name }] }]);
+  }
+  const c = clampRect(r, doc);
+  const s = await imaging.getSelection({ documentID: doc.id, sourceBounds: c });
+  const b = s.sourceBounds || c; // data may cover only part of c
+  return async () => {
+    await imaging.putSelection({ documentID: doc.id, imageData: s.imageData, replace: true, targetBounds: { left: b.left, top: b.top } });
+    s.imageData.dispose();
+  };
+}
+
+// Photoshop 2022: the selection is saved as a channel (kept until the result is removed, for its preview); the crop
+// and the mask come from a merged duplicate saved as JPEG. Returns { jpeg, mask } bytes.
+// ponytail: no conversion to sRGB here (the Imaging path converts); fine for the usual sRGB pages
+async function legacyRead(ctx, doc, job) {
+  job.chan = "Comfy Clean " + job.id.slice(9);
+  await play([{ _obj: "duplicate", _target: [SEL], name: job.chan }]);
+  const sid = await ctx.hostControl.suspendHistory({ documentID: doc.id, name: "Comfy Clean read" });
+  let dup;
+  try {
+    if (preview && preview.docId === doc.id) await play([{ _obj: "hide", null: layerRef(preview) }]); // don't feed a preview back in
+    dup = await doc.duplicate("Comfy Clean read", true); // merged, keeps the channels; becomes the active document
+  } finally {
+    await ctx.hostControl.resumeHistory(sid, false);
+  }
+  try {
+    const r = job.rect;
+    await play([{ _obj: "set", _target: [SEL], to: { _obj: "rectangle", top: px(r.top), left: px(r.left), bottom: px(r.bottom), right: px(r.right) } },
+      { _obj: "crop", delete: true }]);
+    for (const c of [{ _obj: "convertMode", to: { _class: "RGBColorMode" } }, { _obj: "convertMode", depth: 8 }]) {
+      try { await play([c]); } catch (e) {} // already RGB / 8 bit
+    }
+    if (Math.max(job.w, job.h) > 2048) { // same upload cap as the Imaging path
+      const k = 2048 / Math.max(job.w, job.h);
+      await dup.resizeImage(Math.round(job.w * k), Math.round(job.h * k));
+    }
+    const jpeg = await saveJpeg(dup, job.id + ".jpg");
+    await play([SELECT_ALL, fillWith("black"), loadChannel(job.chan)]);
+    try { await play([fillWith("white")]); } catch (e) {} // selection outside the crop = empty mask
+    return { jpeg, mask: await saveJpeg(dup, job.id + "_mask.jpg") };
+  } finally {
+    await dup.closeWithoutSaving();
+  }
+}
+
+async function saveJpeg(d, name) {
+  const f = await (await fs.getTemporaryFolder()).createFile(name, { overwrite: true });
+  await d.saveAs.jpg(f, { quality: 12 }, true);
+  const bytes = new Uint8Array(await f.read({ format: formats.binary }));
+  await f.delete();
+  return bytes;
+}
+
 // selection as one byte per pixel of rect. Photoshop may return only the selected part of rect
 // (its sourceBounds say which part), so place it; reading it as if it were all of rect gives a striped mask.
 async function readSelection(docId, rect) {
@@ -561,12 +658,20 @@ async function cancelJob(job) {
 function removeJob(job) {
   const i = jobs.indexOf(job);
   if (i >= 0) jobs.splice(i, 1);
+  if (job.chan && findDoc(job.docId)) { // Photoshop 2022 path keeps the selection in a channel until the result is gone
+    modal(() => play([{ _obj: "delete", _target: [{ _ref: "channel", _name: job.chan }, { _ref: "document", _id: job.docId }] }])).catch(() => {});
+  }
   render();
 }
 
 // ---------- preview / apply ----------
 
 async function showPreview(job) {
+  placing = true; // two results finishing together must not both auto-place
+  try { await placePreview(job); } finally { placing = false; }
+}
+
+async function placePreview(job) {
   if (preview && preview.job === job) return;
   const doc = findDoc(job.docId);
   if (!doc) throw new Error(`"${job.docName}" was closed.`);
@@ -580,40 +685,48 @@ async function showPreview(job) {
       // exact pixels: open the result as its own document, resize it there to exactly the crop size and copy the
       // pixels in at the crop's corner. Placing it (placeEvent) let Photoshop rescale the smart object, and scaling
       // and moving it back rounded the bounds -> the result landed a few pixels off.
+      // Photoshop 2022 (no Imaging API): copy it instead, paste in place and move it by whole pixels (no resampling)
+      const old = !!job.chan;
       const res = await app.open(tmp);
       await res.resizeImage(job.w, job.h);
-      const pix = await imaging.getPixels({ documentID: res.id, componentSize: 8 });
+      let pix = null;
+      if (old) await play([SELECT_ALL, { _obj: "copyEvent" }]);
+      else pix = await imaging.getPixels({ documentID: res.id, componentSize: 8 });
       await res.closeWithoutSaving();
 
       app.activeDocument = doc; // always the document the selection came from
       const sid = await ctx.hostControl.suspendHistory({ documentID: doc.id, name: "Comfy Clean" });
-      // keep whatever the user has selected now (maybe the next bubble)
-      let userSel = null;
-      if (doc.selection.bounds) {
-        const r = clampRect(doc.selection.bounds, doc);
-        const s = await imaging.getSelection({ documentID: doc.id, sourceBounds: r });
-        userSel = { r: s.sourceBounds || r, data: s.imageData }; // data may cover only part of r
-      }
+      const restoreSel = await keepSelection(doc); // whatever the user has selected now (maybe the next bubble)
 
-      await play([{ _obj: "make", _target: [{ _ref: "layer" }], using: { _obj: "layer", name: "Clean preview" } }]);
-      const layer = doc.activeLayers[0];
+      let layer;
+      if (old) {
+        await deselect(); // a selection would center the paste on it
+        await play([{ _obj: "paste", inPlace: true, antiAlias: { _enum: "antiAliasType", _value: "antiAliasNone" }, as: { _class: "pixel" } }]);
+        layer = doc.activeLayers[0];
+        layer.name = "Clean preview";
+        const b = layer.bounds;
+        await layer.translate(job.rect.left - b.left, job.rect.top - b.top);
+      } else {
+        await play([{ _obj: "make", _target: [{ _ref: "layer" }], using: { _obj: "layer", name: "Clean preview" } }]);
+        layer = doc.activeLayers[0];
+        await imaging.putPixels({ documentID: doc.id, layerID: layer.id, imageData: pix.imageData, targetBounds: { left: job.rect.left, top: job.rect.top } });
+        pix.imageData.dispose();
+      }
       // the result was made from all visible layers, so it goes on top of the stack, not above whatever layer was active
       if (doc.layers[0].id !== layer.id) await layer.move(doc.layers[0], constants.ElementPlacement.PLACEBEFORE);
-      await imaging.putPixels({ documentID: doc.id, layerID: layer.id, imageData: pix.imageData, targetBounds: { left: job.rect.left, top: job.rect.top } });
-      pix.imageData.dispose();
 
       // the exact original selection
-      const m = await imaging.createImageDataFromBuffer(job.sel, { width: job.w, height: job.h, components: 1, chunky: true, colorSpace: "Grayscale" });
-      await imaging.putSelection({ documentID: doc.id, imageData: m, replace: true, targetBounds: { left: job.rect.left, top: job.rect.top } });
-      m.dispose();
+      if (old) await play([loadChannel(job.chan)]);
+      else {
+        const m = await imaging.createImageDataFromBuffer(job.sel, { width: job.w, height: job.h, components: 1, chunky: true, colorSpace: "Grayscale" });
+        await imaging.putSelection({ documentID: doc.id, imageData: m, replace: true, targetBounds: { left: job.rect.left, top: job.rect.top } });
+        m.dispose();
+      }
       // keep only the selected pixels of the result: Clear everything outside the selection
       await play([{ _obj: "inverse" }]);
       try { await play([{ _obj: "delete" }]); } catch (e) {} // nothing outside = nothing to clear
 
-      if (userSel) {
-        await imaging.putSelection({ documentID: doc.id, imageData: userSel.data, replace: true, targetBounds: { left: userSel.r.left, top: userSel.r.top } });
-        userSel.data.dispose();
-      } else await deselect();
+      await restoreSel();
       preview = { job, docId: doc.id, layerId: layer.id };
       await ctx.hostControl.resumeHistory(sid, true);
     });
@@ -627,11 +740,21 @@ async function showPreview(job) {
 async function applyPreview() {
   if (!preview) return;
   const p = preview;
-  await modal(() => play([{ _obj: "set", _target: layerRef(p), to: { _obj: "layer", name: "Clean: " + p.job.prompt.slice(0, 40) } }]));
+  await modal(async () => {
+    await play([{ _obj: "set", _target: layerRef(p), to: { _obj: "layer", name: "Clean: " + p.job.prompt.slice(0, 40) } }]);
+    if (app.activeDocument && app.activeDocument.id === p.docId) await deselect(); // done with this area
+  });
   preview = null;
   p.job.outcome = "applied";
   render();
   status("Applied.");
+}
+
+// after Discard the next result still waiting (oldest first) takes its place, same rules as autoPreview
+// (not after Apply: the user looks at the applied result first and picks the next one from the list)
+async function previewNext() {
+  const next = jobs.slice().reverse().find((j) => j.state === "ready" && !j.outcome);
+  if (next) await autoPreview(next);
 }
 
 // byUser: the Discard button (marks the result); otherwise just swapping to another preview
@@ -644,6 +767,7 @@ async function discardPreview(byUser) {
   }
   if (byUser) { p.job.outcome = "discarded"; status("Discarded. It stays in Results if you change your mind."); }
   render();
+  if (byUser) await previewNext();
 }
 
 // ---------- UI ----------
@@ -667,6 +791,15 @@ function syncPresetPick() {
 }
 
 const finished = (j) => j.state === "ready" || j.state === "error";
+
+// render() rebuilds the list on every progress tick; a fresh <img> decodes the 1-3 MB PNG again and blinks empty
+// meanwhile, so each result keeps one <img> that is just moved into the new row
+const thumbs = new WeakMap();
+function thumbFor(job) {
+  let img = thumbs.get(job);
+  if (!img) { img = el("img", "thumb"); img.src = job.thumb; thumbs.set(job, img); }
+  return img;
+}
 const pad2 = (n) => String(n).padStart(2, "0");
 
 function render() {
@@ -696,7 +829,7 @@ function render() {
   for (const job of shown) {
     const active = preview && preview.job === job;
     const row = el("div", "job" + (job.state === "ready" ? " ready" : "") + (active ? " active" : "") + (job.outcome ? " " + job.outcome : ""));
-    if (job.thumb) { const img = el("img", "thumb"); img.src = job.thumb; row.appendChild(img); }
+    if (job.thumb) row.appendChild(thumbFor(job));
     else row.appendChild(el("div", "thumb" + (job.state === "error" ? "" : " pending")));
 
     const txt = el("div", "txt");
