@@ -47,12 +47,47 @@ async function writeCfg() {
   const f = await (await fs.getDataFolder()).createFile("settings.json", { overwrite: true });
   await f.write(JSON.stringify(cfg, null, 2));
 }
-const save = (f) => { cfg[f] = $(f).value; writeCfg().catch(fail); };
-const fillFields = (names) => { for (const f of names) if (load(f) !== null) $(f).value = load(f); };
+// Settings use Photoshop's Spectrum controls (sp-textfield / sp-picker): plain <input>/<select> render badly
+// in panels, and a <select> filled from JS often doesn't show its options. Every read/write goes through val/setVal.
+const PICKERS = new Set(["model", "clip", "vae", "presetPick"]);
+const menuItems = (id) => [...$(id).querySelectorAll("sp-menu-item")];
+function val(id) {
+  if (!PICKERS.has(id)) return $(id).value || "";
+  const items = menuItems(id), i = $(id).selectedIndex;
+  if (i >= 0 && items[i]) return items[i].getAttribute("value");
+  const sel = items.find((m) => m.hasAttribute("selected"));
+  return sel ? sel.getAttribute("value") : "";
+}
+function setVal(id, v) {
+  if (!PICKERS.has(id)) { $(id).value = v; return; }
+  const items = menuItems(id), i = items.findIndex((m) => m.getAttribute("value") === v);
+  items.forEach((m, k) => (k === i ? m.setAttribute("selected", "") : m.removeAttribute("selected")));
+  try { $(id).selectedIndex = i; } catch (e) {} // -1 = nothing selected (shows the placeholder)
+}
+function fillPicker(id, items) {
+  const menu = $(id).querySelector("sp-menu");
+  menu.innerHTML = "";
+  for (const it of items) {
+    const m = document.createElement("sp-menu-item");
+    m.setAttribute("value", it.value);
+    m.textContent = it.label;
+    menu.appendChild(m);
+  }
+}
+const save = (f) => { cfg[f] = val(f); writeCfg().catch(fail); };
+const fillFields = (names) => { for (const f of names) if (load(f) !== null) setVal(f, load(f)); };
+
+function showSavedPicks() {
+  for (const id of ["model", "clip", "vae"]) {
+    const v = load(id) || (id === "model" ? "" : models.AUTO);
+    if (v && !menuItems(id).length) { fillPicker(id, [{ value: v, label: v === models.AUTO ? "Auto" : v }]); setVal(id, v); }
+  }
+}
 
 async function start() {
   try { cfg = JSON.parse(await (await (await fs.getDataFolder()).getEntry("settings.json")).read()); } catch (e) { cfg = {}; }
   fillFields(MAIN_FIELDS.concat(SETTINGS));
+  showSavedPicks();
   if (!$("prompt").value) $("prompt").value = presets()[0] ? presets()[0].prompt : "";
   renderPresets();
   render();
@@ -60,16 +95,29 @@ async function start() {
 }
 
 $("presetSave").addEventListener("click", () => {
-  const name = $("presetName").value.trim(), prompt = $("prompt").value.trim();
+  const name = val("presetName").trim(), prompt = $("prompt").value.trim();
   if (!name || !prompt) return status("Type a prompt and a preset name first.", true);
   cfg.presets = presets().filter((x) => x.name !== name).concat([{ name, prompt }]); // same name = overwrite
   writeCfg().catch(fail);
-  $("presetName").value = "";
+  setVal("presetName", "");
   $("presetAdd").className = "preset-add hidden";
   renderPresets();
   status(`Preset "${name}" saved.`);
 });
 $("presetCancel").addEventListener("click", () => { $("presetAdd").className = "preset-add hidden"; });
+$("presetPick").addEventListener("change", () => {
+  const pr = presets().find((x) => x.name === val("presetPick"));
+  if (pr) { $("prompt").value = pr.prompt; save("prompt"); render(); }
+});
+$("presetNew").addEventListener("click", () => { $("presetAdd").className = "preset-add"; });
+$("presetDel").addEventListener("click", () => {
+  const name = val("presetPick");
+  if (!presets().some((x) => x.name === name)) return status("Pick a preset to delete first.", true);
+  cfg.presets = presets().filter((x) => x.name !== name);
+  writeCfg().catch(fail);
+  renderPresets();
+  status(`Preset "${name}" deleted.`);
+});
 $("prompt").addEventListener("change", () => save("prompt"));
 $("prompt").addEventListener("input", () => render());
 for (const b of document.querySelectorAll("#modeSeg div")) {
@@ -88,7 +136,7 @@ const showSettings = (on) => {
 $("gear").addEventListener("click", () => showSettings(true));
 $("back").addEventListener("click", () => { fillFields(SETTINGS); showSettings(false); });
 $("saveSettings").addEventListener("click", async () => {
-  for (const f of SETTINGS) cfg[f] = $(f).value;
+  for (const f of SETTINGS) cfg[f] = val(f);
   try {
     await writeCfg();
     await loadModels();
@@ -100,7 +148,7 @@ $("saveSettings").addEventListener("click", async () => {
 });
 $("browseComfy").addEventListener("click", async () => {
   const folder = await fs.getFolder();
-  if (folder) $("comfyDir").value = folder.nativePath;
+  if (folder) setVal("comfyDir", folder.nativePath);
 });
 $("reload").addEventListener("click", () => loadModels().then(() => { $("saveMsg").textContent = "Connected."; })
   .catch((e) => { $("saveMsg").textContent = e.message || String(e); }));
@@ -114,7 +162,7 @@ fs.getTemporaryFolder().then(async (t) => {
 function status(msg, err) { $("status").textContent = msg; $("status").className = "status" + (err ? " err" : ""); }
 function fail(e) { status(e.message || String(e), true); }
 function conn(ok, text) { $("dot").className = "dot " + (ok ? "ok" : "off"); $("connText").textContent = text; }
-const baseUrl = () => $("url").value.replace(/\/+$/, "");
+const baseUrl = () => val("url").replace(/\/+$/, "");
 const modal = (fn, name = "Comfy Clean") => core.executeAsModal(fn, { commandName: name });
 const play = (cmds) => action.batchPlay(cmds, {});
 const deselect = () => play([{ _obj: "set", _target: [{ _ref: "channel", _property: "selection" }], to: { _enum: "ordinal", _value: "none" } }]);
@@ -132,33 +180,28 @@ async function loadModels() {
     conn(false, "ComfyUI offline");
     throw new Error("ComfyUI not reachable. Start it, or check the URL in Settings.");
   }
-  const fill = (sel, items, auto) => {
-    const prev = sel.value; // keep an unsaved pick when testing the connection
-    sel.innerHTML = "";
+  const fill = (id, items, auto) => {
+    const prev = val(id); // keep an unsaved pick when testing the connection
     if (auto) items = [{ value: models.AUTO, label: "Auto" }].concat(items);
-    for (const it of items) {
-      const o = document.createElement("option");
-      o.value = it.value; o.textContent = it.label;
-      sel.appendChild(o);
-    }
-    sel.value = prev || load(sel.id) || (auto ? models.AUTO : "flux-2-klein-9b-Q4_K_S.gguf");
-    if (sel.selectedIndex < 0) sel.selectedIndex = 0;
+    fillPicker(id, items);
+    const want = prev || load(id) || (auto ? models.AUTO : "flux-2-klein-9b-Q4_K_S.gguf");
+    setVal(id, items.some((it) => it.value === want) ? want : items[0] && items[0].value);
   };
   const tag = { flux2: "Klein", kontext: "Kontext", fill: "Fill" };
   const list = models.listModels(objectInfo);
   if (!list.length) throw new Error("No Flux.2 Klein, Kontext or Fill model found in ComfyUI.");
-  fill($("model"), list.map((m) => ({ value: m.name, label: `${m.name}  (${tag[m.family]}${m.nunchaku ? ", Nunchaku" : ""})` })));
-  fill($("clip"), models.encoderList(objectInfo).map((n) => ({ value: n, label: n })), true);
-  fill($("vae"), models.vaeList(objectInfo).map((n) => ({ value: n, label: n })), true);
+  fill("model", list.map((m) => ({ value: m.name, label: `${m.name}  (${tag[m.family]}${m.nunchaku ? ", Nunchaku" : ""})` })));
+  fill("clip", models.encoderList(objectInfo).map((n) => ({ value: n, label: n })), true);
+  fill("vae", models.vaeList(objectInfo).map((n) => ({ value: n, label: n })), true);
   showAutoPicks();
-  conn(true, $("model").value.replace(/\.(gguf|safetensors)$/, ""));
+  conn(true, val("model").replace(/\.(gguf|safetensors)$/, ""));
   status("Make a selection, then click " + ($("mode").value === "edit" ? "Edit." : "Clean."));
 }
 
 function showAutoPicks() {
   if (!objectInfo) return;
   try {
-    const r = models.resolve(objectInfo, { model: $("model").value, clip: $("clip").value, vae: $("vae").value });
+    const r = models.resolve(objectInfo, { model: val("model"), clip: val("clip"), vae: val("vae") });
     $("autoHint").textContent = `Uses: ${r.enc.main}${r.enc.clipL ? " + " + r.enc.clipL : ""} \u00b7 ${r.vae}`;
     $("autoHint").className = "hint";
   } catch (e) {
@@ -184,7 +227,7 @@ async function clean() {
   if (!sel) throw new Error("Make a selection first.");
 
   const edit = $("mode").value === "edit";
-  const pad = +$("pad").value || 0;
+  const pad = +val("pad") || 0;
   showPanel();
   // Only this crop goes to ComfyUI, so page height doesn't matter.
   // clean: full page width, selection's height band + context above/below. edit: just the selection box.
@@ -225,9 +268,9 @@ async function clean() {
     await ensureComfy(job);
     if (!objectInfo) await loadModels();
     const wf = models.buildGraph(objectInfo, await loadTemplates(), {
-      model: $("model").value || load("model"), clip: $("clip").value || load("clip") || models.AUTO,
-      vae: $("vae").value || load("vae") || models.AUTO, steps: +$("steps").value || 0,
-      colorMatch: Math.min(1, Math.max(0, $("colorMatch").value === "" ? 1 : +$("colorMatch").value || 0)),
+      model: val("model") || load("model"), clip: val("clip") || load("clip") || models.AUTO,
+      vae: val("vae") || load("vae") || models.AUTO, steps: +val("steps") || 0,
+      colorMatch: Math.min(1, Math.max(0, val("colorMatch") === "" ? 1 : +val("colorMatch") || 0)),
       edit, prompt: job.prompt, seed: Math.floor(Math.random() * 2 ** 31), image: "", mask: "",
     });
 
@@ -274,7 +317,7 @@ async function reachable(base) {
 async function ensureComfy(job) {
   if (await reachable(job.base)) return;
   objectInfo = null;
-  const dir = $("comfyDir").value.trim().replace(/[\\/]+$/, "");
+  const dir = val("comfyDir").trim().replace(/[\\/]+$/, "");
   if (!dir) throw new Error("ComfyUI isn't running. Start it, or set the ComfyUI folder in Settings so the plugin can start it.");
   job.state = "starting"; render();
   if (!starting) starting = startComfy(dir, job.base).finally(() => { starting = null; });
@@ -388,7 +431,7 @@ const post = (base, path, body) => fetch(base + path, { method: "POST", headers:
 // so do that automatically: if no sampler step finishes within the limit, interrupt and requeue at the front.
 // 2nd retry also asks ComfyUI to unload models and free VRAM first.
 async function retryIfStuck(job) {
-  const limit = +$("stuck").value || 0;
+  const limit = +val("stuck") || 0;
   if (!limit || !job.sampling || Date.now() - job.tick < limit * 1000 || job.retries >= 2) return;
   job.retries++;
   job.state = "retrying"; render();
@@ -536,30 +579,14 @@ function el(tag, cls, text) {
 }
 
 function renderPresets() {
-  const box = $("presets");
-  box.innerHTML = "";
-  for (const pr of presets()) {
-    const c = el("div", "chip", pr.name);
-    c.dataset.p = pr.prompt;
-    c.title = pr.prompt;
-    c.addEventListener("click", () => { $("prompt").value = pr.prompt; save("prompt"); render(); });
-    const del = el("span", "del", "\u00d7");
-    del.title = "Delete preset";
-    del.addEventListener("click", (e) => {
-      e.stopPropagation();
-      cfg.presets = presets().filter((x) => x !== pr);
-      writeCfg().catch(fail);
-      renderPresets();
-      status(`Preset "${pr.name}" deleted.`);
-    });
-    c.appendChild(del);
-    box.appendChild(c);
-  }
-  const add = el("div", "chip add", "+");
-  add.title = "Save the current prompt as a preset";
-  add.addEventListener("click", () => { $("presetAdd").className = "preset-add"; $("presetName").focus(); });
-  box.appendChild(add);
+  fillPicker("presetPick", presets().map((pr) => ({ value: pr.name, label: pr.name })));
   render();
+}
+
+// the preset dropdown shows the preset whose text is in the prompt box, or its placeholder when edited
+function syncPresetPick() {
+  const pr = presets().find((x) => x.prompt === $("prompt").value.trim());
+  if (val("presetPick") !== (pr ? pr.name : "")) setVal("presetPick", pr ? pr.name : "");
 }
 
 const finished = (j) => j.state === "ready" || j.state === "error";
@@ -572,9 +599,7 @@ function render() {
     ? "Regenerates the whole selection from the prompt."
     : "Selection is the mask. A full-width strip around it is sent as context.";
   $("go").textContent = edit ? "Edit selection" : "Clean selection";
-  for (const c of document.querySelectorAll("#presets .chip")) {
-    if (c.dataset.p !== undefined) c.className = "chip" + (c.dataset.p === $("prompt").value.trim() ? " on" : "");
-  }
+  syncPresetPick();
   $("previewBar").className = "preview-bar" + (preview ? "" : " hidden");
   $("count").textContent = jobs.length;
   $("sessionStats").textContent = jobs.length
@@ -586,7 +611,7 @@ function render() {
   const box = $("jobs");
   box.innerHTML = "";
   if (!shown.length) {
-    box.appendChild(el("div", "empty", jobs.length ? "Nothing here with this filter." : "Every result of this Photoshop session shows up here. Click one to preview it in place."));
+    box.appendChild(el("div", "empty", jobs.length ? "Nothing here with this filter." : "Results of this session appear here."));
   }
   for (const job of shown) {
     const active = preview && preview.job === job;

@@ -33,7 +33,42 @@
       "preferredFloatingSize": {
         "width": 260,
         "height": 420
-      }
+      },
+      "icons": [
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/panel-dark.png",
+          "scale": [
+            1,
+            2
+          ],
+          "theme": [
+            "darkest",
+            "dark",
+            "medium"
+          ],
+          "species": [
+            "chrome"
+          ]
+        },
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/panel-light.png",
+          "scale": [
+            1,
+            2
+          ],
+          "theme": [
+            "lightest",
+            "light"
+          ],
+          "species": [
+            "chrome"
+          ]
+        }
+      ]
     },
     {
       "type": "command",
@@ -56,5 +91,22 @@
         ".vbs"
       ]
     }
-  }
+  },
+  "icons": [
+    {
+      "width": 48,
+      "height": 48,
+      "path": "icons/plugin.png",
+      "scale": [
+        1,
+        2
+      ],
+      "theme": [
+        "all"
+      ],
+      "species": [
+        "pluginList"
+      ]
+    }
+  ]
 }
