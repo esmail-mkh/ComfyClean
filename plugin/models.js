@@ -18,17 +18,23 @@ function options(info, cls, input) {
   return Array.isArray(spec[0]) ? spec[0] : (spec[1] && spec[1].options) || [];
 }
 
-// every supported diffusion model, with the loader node that can open it
+// every supported diffusion model, with the loader node that can open it.
+// The loaders' file lists overlap (Nunchaku's lists the whole diffusion_models folder, and its
+// models are plain .safetensors), so the loader is picked from the file name, not the list it came from.
+const NUNCHAKU = /svdq|nunchaku/i;
 function listModels(info) {
   const out = [], seen = new Set();
-  for (const [cls, input] of [["UnetLoaderGGUF", "unet_name"], ["UNETLoader", "unet_name"], ["NunchakuFluxDiTLoader", "model_path"]]) {
-    for (const name of options(info, cls, input)) {
-      const fam = family(name);
-      if (!fam || seen.has(name)) continue;
-      if (cls === "UNETLoader" && /\.gguf$/i.test(name)) continue;
-      seen.add(name);
-      out.push({ name, cls, input, family: fam, nunchaku: cls.startsWith("Nunchaku") });
-    }
+  const names = ["UnetLoaderGGUF", "UNETLoader", "NunchakuFluxDiTLoader"]
+    .flatMap((cls) => options(info, cls, cls === "NunchakuFluxDiTLoader" ? "model_path" : "unet_name"));
+  for (const name of names) {
+    const fam = family(name);
+    if (!fam || seen.has(name)) continue;
+    seen.add(name);
+    let cls = "UNETLoader", input = "unet_name";
+    if (/\.gguf$/i.test(name)) cls = "UnetLoaderGGUF";
+    else if (NUNCHAKU.test(name)) [cls, input] = ["NunchakuFluxDiTLoader", "model_path"]; // Flux.1 only
+    if (!info[cls] || (cls === "NunchakuFluxDiTLoader" && fam === "flux2")) continue; // loader not installed / can't load it
+    out.push({ name, cls, input, family: fam, nunchaku: cls === "NunchakuFluxDiTLoader" });
   }
   return out;
 }
