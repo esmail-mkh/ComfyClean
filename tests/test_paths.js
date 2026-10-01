@@ -93,8 +93,11 @@ async function run(withImaging) {
   assert.strictEqual(count(), "3", "page.psd has its 3 results");
   appState.activeDocument = doc2; onEvent("select");
   assert.strictEqual(count(), "0", "page2.psd shows only its own results");
+  const running = { ...job, id: job.id + "r", state: "running", outcome: undefined, pid: null };
+  P.jobs.unshift(running); // still being made when page.psd closes
   appState.documents = [doc2]; onEvent("close"); // page.psd closed
-  assert.strictEqual(P.jobs.length, 0, "a closed document's finished results are dropped");
+  assert.strictEqual(P.jobs.length, 0, "all of a closed document's results are dropped at once");
+  assert.ok(running.cancelled, "its running job is cancelled in ComfyUI");
   console.log(`${withImaging ? "imaging" : "2022"} path ok`);
 }
 

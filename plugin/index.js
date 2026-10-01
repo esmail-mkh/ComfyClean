@@ -909,16 +909,20 @@ $("clearDone").addEventListener("click", () => {
   status("Cleared this page's finished results.");
 });
 
-// Results follow the document tab in Photoshop. A closed document's results can't be placed anymore: dropped
-// (its running jobs finish and are dropped on the next close/switch).
+// Results belong to their document (by Photoshop's document id, never reused in a session, so a new file with the
+// same name never sees them). Closing a document drops all of its results at once and cancels its queued and
+// running jobs in ComfyUI.
+function dropClosedDocs() {
+  if (preview && !findDoc(preview.docId)) preview = null;
+  for (const j of jobs.filter((j) => !findDoc(j.docId))) {
+    if (!finished(j)) cancelJob(j).catch(() => {});
+    removeJob(j);
+  }
+}
+// Results follow the document tab. Checked on every event, not only "close": the close notice may arrive
+// before Photoshop has dropped the document from its list.
 try {
-  action.addNotificationListener(["select", "open", "close", "make"], (event) => {
-    if (event === "close") {
-      if (preview && !findDoc(preview.docId)) preview = null;
-      for (const j of jobs.filter((j) => finished(j) && !findDoc(j.docId))) removeJob(j);
-    }
-    render();
-  });
+  action.addNotificationListener(["select", "open", "close", "make"], () => { dropClosedDocs(); render(); });
 } catch (e) {} // a throw here would stop the rest of this file from loading
 
 function stateText(job) {
