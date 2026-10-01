@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { color: var(--uxp-host-text-color); font-size: 12px; padding: 8px; }
+  label { display: block; margin-top: 8px; }
+  select, input, textarea { width: 100%; }
+  textarea { height: 60px; }
+  .row { display: flex; gap: 8px; }
+  .row > div { flex: 1; }
+  button { width: 100%; margin-top: 12px; height: 32px; }
+  #status { margin-top: 8px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <label>Mode</label>
+  <select id="mode">
+    <option value="clean">Clean (selection = mask)</option>
+    <option value="edit">Edit (whole selection, no mask)</option>
+  </select>
+
+  <label>Preset</label>
+  <select id="preset">
+    <option value="remove all text">Remove text</option>
+    <option value="remove all text, keep the speech bubble and its background clean">Remove text, keep bubble</option>
+    <option value="remove the text and the speech bubble, restore the background art behind it">Remove text + bubble</option>
+    <option value="remove the sound effect lettering, restore the background art behind it">Remove SFX</option>
+    <option value="remove the object, fill with matching background">Remove object</option>
+  </select>
+
+  <label>Prompt</label>
+  <textarea id="prompt"></textarea>
+
+  <label>Context above &amp; below selection (px, Clean only)</label>
+  <input id="pad" type="number" value="96">
+
+  <label>Model</label>
+  <select id="model"></select>
+  <label>Text encoder</label>
+  <select id="clip"></select>
+
+  <label>ComfyUI URL</label>
+  <div class="row">
+    <div><input id="url" value="http://127.0.0.1:8188"></div>
+    <button id="reload" style="width:auto;margin-top:0;height:auto">Reload models</button>
+  </div>
+
+  <button id="go">Clean selection</button>
+  <div id="status">Make a selection, then click Clean.</div>
+
+  <script src="index.js"></script>
+</body>
+</html>
