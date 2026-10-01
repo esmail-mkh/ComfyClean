@@ -1,69 +1,167 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8">
 <style>
-  body { color: var(--uxp-host-text-color); font-size: 12px; padding: 8px; }
-  label { display: block; margin-top: 8px; }
-  select, input, textarea { width: 100%; }
-  textarea { height: 60px; }
-  .row { display: flex; gap: 8px; }
-  .row > div { flex: 1; }
-  button { width: 100%; margin-top: 12px; height: 32px; }
-  #status { margin-top: 8px; white-space: pre-wrap; }
-  .job { display: flex; gap: 6px; align-items: center; padding: 4px; margin-top: 4px; border: 1px solid #555; border-radius: 3px; }
-  .job.ready { cursor: pointer; }
-  .job.active { border-color: #2d8ceb; background: rgba(45, 140, 235, 0.15); }
-  .job img { width: 56px; height: 40px; object-fit: cover; }
+  :root {
+    --text: var(--uxp-host-text-color, #e6e6e6);
+    --muted: rgba(255, 255, 255, 0.55);
+    --card: rgba(255, 255, 255, 0.05);
+    --card-hover: rgba(255, 255, 255, 0.09);
+    --line: rgba(255, 255, 255, 0.10);
+    --accent: #378ef0;
+    --accent-soft: rgba(55, 142, 240, 0.18);
+    --ok: #2fb67c;
+    --warn: #e8a33d;
+    --err: #ec5b62;
+  }
+  @media (prefers-color-scheme: light), (prefers-color-scheme: lightest) {
+    :root {
+      --muted: rgba(0, 0, 0, 0.55);
+      --card: rgba(0, 0, 0, 0.04);
+      --card-hover: rgba(0, 0, 0, 0.08);
+      --line: rgba(0, 0, 0, 0.12);
+      --accent-soft: rgba(55, 142, 240, 0.14);
+    }
+  }
+
+  body { color: var(--text); font-size: 12px; padding: 10px 12px 14px; margin: 0; }
+  .row { display: flex; align-items: center; }
+  .grow { flex: 1; }
+  .muted { color: var(--muted); }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .brand { font-size: 14px; font-weight: bold; letter-spacing: 0.3px; }
+  .conn { display: flex; align-items: center; font-size: 11px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 4px; margin-right: 6px; background: var(--warn); }
+  .dot.ok { background: var(--ok); }
+  .dot.off { background: var(--err); }
+
+  .seg { display: flex; padding: 2px; border-radius: 6px; background: var(--card); border: 1px solid var(--line); }
+  .seg div { flex: 1; text-align: center; padding: 6px 0; border-radius: 4px; color: var(--muted); font-weight: bold; }
+  .seg div:hover { color: var(--text); }
+  .seg div.on { background: var(--accent); color: #fff; }
+  .hint { margin: 6px 2px 0; font-size: 11px; color: var(--muted); }
+  .hint.err { color: var(--err); }
+
+  .label { margin: 14px 0 6px; font-size: 10px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; margin: -2px; }
+  .chip { margin: 2px; padding: 4px 9px; border-radius: 11px; border: 1px solid var(--line); background: var(--card); font-size: 11px; }
+  .chip:hover { background: var(--card-hover); }
+  .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+  textarea { width: 100%; height: 56px; margin-top: 8px; }
+  select, input { width: 100%; }
+
+  .go { margin-top: 12px; }
+  sp-button { width: 100%; }
+  .status { margin-top: 8px; min-height: 14px; font-size: 11px; color: var(--muted); }
+  .status.err { color: var(--err); }
+
+  .preview-bar { margin-top: 10px; padding: 10px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent-soft); }
+  .preview-bar .pv { font-weight: bold; margin-bottom: 8px; }
+  .preview-bar sp-button { flex: 1; }
+  .preview-bar .sp { width: 8px; }
+
+  .count { margin-left: 6px; padding: 0 6px; border-radius: 7px; background: var(--card-hover); font-size: 10px; }
+  .empty { padding: 14px; text-align: center; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); font-size: 11px; }
+  .job { display: flex; align-items: center; padding: 6px; margin-bottom: 6px; border-radius: 6px; background: var(--card); border: 1px solid transparent; }
+  .job.ready:hover { background: var(--card-hover); border-color: var(--line); }
+  .job.active { border-color: var(--accent); background: var(--accent-soft); }
+  .thumb { width: 52px; height: 38px; margin-right: 8px; border-radius: 4px; background: var(--card-hover); }
   .job .txt { flex: 1; overflow: hidden; }
-  .job .sub { opacity: 0.7; }
-  .job button { width: 24px; height: 24px; margin: 0; }
+  .job .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job .sub { margin-top: 2px; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job .sub.err { color: var(--err); white-space: normal; }
+  .job .sub.okc { color: var(--ok); }
+  .tag { padding: 0 5px; margin-right: 4px; border-radius: 3px; font-size: 9px; font-weight: bold; background: var(--card-hover); color: var(--muted); }
+  .bar { height: 3px; margin-top: 5px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .bar div { height: 3px; background: var(--accent); }
+  .x { width: 22px; height: 22px; margin-left: 6px; border-radius: 11px; text-align: center; line-height: 22px; color: var(--muted); }
+  .x:hover { background: var(--card-hover); color: var(--err); }
+
+  .icon { width: 24px; height: 24px; margin-left: 6px; border-radius: 12px; text-align: center; line-height: 24px; font-size: 15px; color: var(--muted); }
+  .icon:hover { background: var(--card-hover); color: var(--text); }
+  .page-head { display: flex; align-items: center; padding-bottom: 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+  .page-head .icon { margin: 0 6px 0 0; }
+  .page-title { font-size: 14px; font-weight: bold; }
+  .group { margin-bottom: 6px; }
+  .field { margin-top: 10px; }
+  .field .k { margin-bottom: 4px; font-size: 11px; color: var(--muted); }
+  .pair { display: flex; }
+  .pair .field { flex: 1; }
+  .pair .sp { width: 8px; }
+  .hidden { display: none; }
 </style>
 </head>
 <body>
 <div id="app">
-  <label>Mode</label>
-  <select id="mode">
-    <option value="clean">Clean (selection = mask)</option>
-    <option value="edit">Edit (whole selection, no mask)</option>
-  </select>
+  <header>
+    <div class="brand">Comfy Clean</div>
+    <div class="row">
+      <div class="conn"><div class="dot" id="dot"></div><span id="connText">Connecting...</span></div>
+      <div class="icon" id="gear" title="Settings">&#9881;</div>
+    </div>
+  </header>
 
-  <label>Preset</label>
-  <select id="preset">
-    <option value="remove all text">Remove text</option>
-    <option value="remove all text, keep the speech bubble and its background clean">Remove text, keep bubble</option>
-    <option value="remove the text and the speech bubble, restore the background art behind it">Remove text + bubble</option>
-    <option value="remove the sound effect lettering, restore the background art behind it">Remove SFX</option>
-    <option value="remove the object, fill with matching background">Remove object</option>
-  </select>
+  <div id="mainView">
 
-  <label>Prompt</label>
-  <textarea id="prompt"></textarea>
+  <div class="seg" id="modeSeg">
+    <div data-v="clean">Clean</div>
+    <div data-v="edit">Edit</div>
+  </div>
+  <input id="mode" class="hidden" value="clean">
+  <div class="hint" id="modeHint"></div>
 
-  <label>Context above &amp; below selection (px, Clean only)</label>
-  <input id="pad" type="number" value="96">
+  <div class="label">Prompt</div>
+  <div class="chips" id="presets">
+    <div class="chip" data-p="remove all text">Text</div>
+    <div class="chip" data-p="remove all text, keep the speech bubble and its background clean">Text, keep bubble</div>
+    <div class="chip" data-p="remove the text and the speech bubble, restore the background art behind it">Text + bubble</div>
+    <div class="chip" data-p="remove the sound effect lettering, restore the background art behind it">SFX</div>
+    <div class="chip" data-p="remove the object, fill with matching background">Object</div>
+  </div>
+  <textarea id="prompt" placeholder="Describe what to do with the selection"></textarea>
 
-  <label>Auto-retry if a step takes longer than (s, 0 = off)</label>
-  <input id="stuck" type="number" value="30">
+  <div class="go"><sp-button id="go" variant="cta">Clean selection</sp-button></div>
+  <div class="status" id="status"></div>
 
-  <label>Model</label>
-  <select id="model"></select>
-  <label>Text encoder</label>
-  <select id="clip"></select>
-
-  <label>ComfyUI URL</label>
-  <div class="row">
-    <div><input id="url" value="http://127.0.0.1:8188"></div>
-    <button id="reload" style="width:auto;margin-top:0;height:auto">Reload models</button>
+  <div id="previewBar" class="preview-bar hidden">
+    <div class="pv">Previewing in document</div>
+    <div class="row">
+      <sp-button id="apply" variant="cta">Apply</sp-button>
+      <div class="sp"></div>
+      <sp-button id="discard" variant="secondary">Discard</sp-button>
+    </div>
   </div>
 
-  <button id="go">Clean selection</button>
-  <div id="status">Make a selection, then click Clean.</div>
-
-  <div id="previewBar" class="row" style="display:none">
-    <div><button id="apply">Apply</button></div>
-    <div><button id="discard">Discard</button></div>
-  </div>
+  <div class="label row">Results<span class="count" id="count">0</span></div>
   <div id="jobs"></div>
+
+  </div>
+
+  <div id="settingsView" class="hidden">
+    <div class="page-head"><div class="icon" id="back" title="Back">&#8592;</div><div class="page-title">Settings</div></div>
+    <div class="group">
+      <div class="label">Generation</div>
+      <div class="field"><div class="k">Model</div><select id="model"></select></div>
+      <div class="field"><div class="k">Text encoder</div><select id="clip"></select></div>
+      <div class="field"><div class="k">VAE</div><select id="vae"></select></div>
+      <div class="hint" id="autoHint"></div>
+      <div class="pair">
+        <div class="field"><div class="k">Steps (0 = model default)</div><input id="steps" type="number" value="0"></div>
+        <div class="sp"></div>
+        <div class="field"><div class="k">Context above/below (px)</div><input id="pad" type="number" value="96"></div>
+      </div>
+      <div class="field"><div class="k">Auto-retry if a step takes longer than (s, 0 = off)</div><input id="stuck" type="number" value="30"></div>
+    </div>
+    <div class="group">
+      <div class="label">Connection</div>
+      <div class="field"><div class="k">ComfyUI URL</div><input id="url" value="http://127.0.0.1:8188"></div>
+      <div class="field"><sp-button id="reload" variant="secondary">Test connection</sp-button></div>
+    </div>
+    <div class="field"><sp-button id="saveSettings" variant="cta">Save</sp-button></div>
+    <div class="status" id="saveMsg"></div>
+  </div>
 </div>
 <script src="index.js"></script>
 </body>

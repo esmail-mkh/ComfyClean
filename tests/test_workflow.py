@@ -1,8 +1,8 @@
-"""Runs plugin/workflow.json against a live ComfyUI the same way the plugin does:
+"""Runs the plugin's graphs (built by plugin/models.js) against a live ComfyUI the same way the plugin does:
 crop + selection mask in, result composited back through the mask, then checks the
 cleaned area matches the known clean background (no darker/lighter patch).
-Usage: python tests/test_workflow.py [--edit]  (ComfyUI must be running on 127.0.0.1:8188)"""
-import json, random, sys, time, urllib.parse, urllib.request, uuid
+Usage: python tests/test_workflow.py [--edit] [--model NAME] [--steps N]  (ComfyUI must be running on 127.0.0.1:8188)"""
+import json, random, subprocess, sys, time, urllib.parse, urllib.request, uuid
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -42,24 +42,22 @@ def upload(img, name):
     return json.load(urllib.request.urlopen(req))["name"] + " [temp]"  # same as the plugin: ComfyUI temp/, not input/
 
 
-def to_edit_graph(wf):
-    """Mirror of toEditGraph() in plugin/index.js."""
-    for n in ("20", "21", "22", "23"):
-        del wf[n]
-    wf["16"] = {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": ["6", 0], "height": ["6", 1], "batch_size": 1}}
-    wf["17"]["inputs"]["latent_image"] = ["16", 0]
-    wf["19"]["inputs"]["images"] = ["18", 0]
+MODEL = sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else "flux-2-klein-9b-Q4_K_S.gguf"
+STEPS = int(sys.argv[sys.argv.index("--steps") + 1]) if "--steps" in sys.argv else 0
+
+
+def build_graph(**opts):
+    """Same graph the plugin would send: plugin/models.js via tests/graph.js."""
+    (TMP / "object_info.json").write_bytes(urllib.request.urlopen(URL + "/object_info").read())
+    opts = {"model": MODEL, "clip": "auto", "vae": "auto", "steps": STEPS, "seed": random.randint(0, 2**31), **opts}
+    out = subprocess.run(["node", str(ROOT / "graph.js")], input=json.dumps(opts), capture_output=True, text=True, check=True)
+    return json.loads(out.stdout)
 
 
 def run(src, mask, prompt_text):
-    wf = json.loads((ROOT.parent / "plugin" / "workflow.json").read_text())
-    wf["4"]["inputs"]["image"] = upload(src, "t_src.jpg")
-    if mask is None:
-        to_edit_graph(wf)
-    else:
-        wf["20"]["inputs"]["image"] = upload(mask, "t_mask.jpg")
-    wf["7"]["inputs"]["text"] = prompt_text
-    wf["15"]["inputs"]["noise_seed"] = random.randint(0, 2**31)
+    wf = build_graph(edit=mask is None, prompt=prompt_text, image=upload(src, "t_src.jpg"),
+                     mask=upload(mask, "t_mask.jpg") if mask is not None else "")
+    print("model", MODEL, "| clip", wf["2"]["inputs"], "| vae", wf["3"]["inputs"]["vae_name"])
     req = urllib.request.Request(URL + "/prompt", json.dumps({"prompt": wf}).encode(), {"Content-Type": "application/json"})
     try:
         pid = json.load(urllib.request.urlopen(req))["prompt_id"]

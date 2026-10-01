@@ -1,0 +1,19 @@
+{
+  "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "MODEL"}},
+  "2": {"class_type": "DualCLIPLoader", "inputs": {"clip_name1": "t5xxl.safetensors", "clip_name2": "clip_l.safetensors", "type": "flux"}},
+  "3": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
+  "4": {"class_type": "LoadImage", "inputs": {"image": "INPUT"}},
+  "5": {"class_type": "ImageScaleToTotalPixels", "inputs": {"image": ["4", 0], "upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 16}},
+  "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "PROMPT", "clip": ["2", 0]}},
+  "8": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["2", 0]}},
+  "18": {"class_type": "VAEDecode", "inputs": {"samples": ["15", 0], "vae": ["3", 0]}},
+  "9": {"class_type": "VAEEncode", "inputs": {"pixels": ["5", 0], "vae": ["3", 0]}},
+  "10": {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["7", 0], "latent": ["9", 0]}},
+  "24": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["10", 0], "guidance": 2.5}},
+  "21": {"class_type": "SetLatentNoiseMask", "inputs": {"samples": ["9", 0], "mask": ["20", 0]}},
+  "15": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": 0, "steps": 20, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "positive": ["24", 0], "negative": ["8", 0], "latent_image": ["21", 0], "denoise": 1.0}},
+  "20": {"class_type": "LoadImageMask", "inputs": {"image": "MASK", "channel": "red"}},
+  "22": {"class_type": "ImageCompositeMasked", "inputs": {"destination": ["5", 0], "source": ["18", 0], "x": 0, "y": 0, "resize_source": false, "mask": ["20", 0]}},
+  "23": {"class_type": "ColorTransfer", "inputs": {"image_target": ["18", 0], "image_ref": ["22", 0], "method": "reinhard_lab", "source_stats": "per_frame", "strength": 1.0}},
+  "19": {"class_type": "PreviewImage", "inputs": {"images": ["23", 0]}}
+}

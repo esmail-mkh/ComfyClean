@@ -1,15 +1,19 @@
 const { app, core, imaging, action, constants } = require("photoshop");
 const uxp = require("uxp");
 const { localFileSystem: fs, formats } = uxp.storage;
+const models = require("./models.js");
 
 const $ = (id) => document.getElementById(id);
-const FIELDS = ["mode", "prompt", "pad", "stuck", "url", "model", "clip"];
+const MAIN_FIELDS = ["mode", "prompt"]; // auto-saved as you use them
+const SETTINGS = ["pad", "stuck", "url", "model", "clip", "vae", "steps"]; // saved with the Save button
 const CLIENT = "ps_clean_" + Date.now();
 const SRGB = "sRGB IEC61966-2.1";
 const jobs = []; // newest first. Results live only in memory: gone when Photoshop closes.
 let preview = null; // { job, docId, layerId } -- the result currently shown in its document
 let jobSeq = 0;
 let ws = null;
+let objectInfo = null; // ComfyUI /object_info, cached by loadModels
+let templates = null; // plugin/workflows/*.json
 
 // "Clean selection" is also a Plugins-menu command, so it can get a keyboard shortcut
 uxp.entrypoints.setup({
@@ -21,36 +25,66 @@ uxp.entrypoints.setup({
   },
 });
 
-const load = (f) => { try { return localStorage.getItem("cc_" + f); } catch (e) { return null; } };
-const save = (f) => { try { localStorage.setItem("cc_" + f, $(f).value); } catch (e) {} };
-
-// remember settings between sessions
-for (const f of FIELDS) {
-  const v = load(f);
-  if (v !== null) $(f).value = v;
-  $(f).addEventListener("change", () => save(f));
+// settings live in a JSON file in the plugin's data folder, so they survive Photoshop restarts
+let cfg = {};
+const load = (f) => (cfg[f] === undefined ? null : cfg[f]);
+async function writeCfg() {
+  const f = await (await fs.getDataFolder()).createFile("settings.json", { overwrite: true });
+  await f.write(JSON.stringify(cfg, null, 2));
 }
-if (!$("prompt").value) $("prompt").value = $("preset").value;
-$("preset").addEventListener("change", () => { $("prompt").value = $("preset").value; save("prompt"); });
+const save = (f) => { cfg[f] = $(f).value; writeCfg().catch(fail); };
+const fillFields = (names) => { for (const f of names) if (load(f) !== null) $(f).value = load(f); };
+
+async function start() {
+  try { cfg = JSON.parse(await (await (await fs.getDataFolder()).getEntry("settings.json")).read()); } catch (e) { cfg = {}; }
+  fillFields(MAIN_FIELDS.concat(SETTINGS));
+  if (!$("prompt").value) $("prompt").value = chips[0].dataset.p;
+  render();
+  await loadModels().catch(() => {});
+}
+
+const chips = [...document.querySelectorAll("#presets .chip")];
+for (const c of chips) c.addEventListener("click", () => { $("prompt").value = c.dataset.p; save("prompt"); render(); });
+$("prompt").addEventListener("change", () => save("prompt"));
+$("prompt").addEventListener("input", () => render());
+for (const b of document.querySelectorAll("#modeSeg div")) {
+  b.addEventListener("click", () => { $("mode").value = b.dataset.v; save("mode"); render(); });
+}
 $("go").addEventListener("click", () => clean().catch(fail));
-$("reload").addEventListener("click", () => loadModels().catch(fail));
 $("apply").addEventListener("click", () => applyPreview().catch(fail));
 $("discard").addEventListener("click", () => discardPreview(true).catch(fail));
-$("mode").addEventListener("change", () => render());
-// 4B model wants Qwen3-4B, 9B wants Qwen3-8B
-$("model").addEventListener("change", () => {
-  const want = /4b/i.test($("model").value) ? /qwen3.?4b/i : /9b/i.test($("model").value) ? /qwen3.?8b/i : null;
-  const opt = want && [...$("clip").options].find((o) => want.test(o.value));
-  if (opt) { $("clip").value = opt.value; save("clip"); }
+
+// separate settings page: gear opens it, Save writes the file, Back throws edits away
+const showSettings = (on) => {
+  $("mainView").className = on ? "hidden" : "";
+  $("settingsView").className = on ? "" : "hidden";
+  $("saveMsg").textContent = "";
+};
+$("gear").addEventListener("click", () => showSettings(true));
+$("back").addEventListener("click", () => { fillFields(SETTINGS); showSettings(false); });
+$("saveSettings").addEventListener("click", async () => {
+  for (const f of SETTINGS) cfg[f] = $(f).value;
+  try {
+    await writeCfg();
+    await loadModels();
+    showSettings(false);
+    status("Settings saved.");
+  } catch (e) {
+    $("saveMsg").textContent = e.message || String(e);
+  }
 });
-loadModels().catch(() => status("ComfyUI not reachable. Start it, then Reload models."));
+$("reload").addEventListener("click", () => loadModels().then(() => { $("saveMsg").textContent = "Connected."; })
+  .catch((e) => { $("saveMsg").textContent = e.message || String(e); }));
+for (const f of ["model", "clip", "vae"]) $(f).addEventListener("change", () => showAutoPicks());
+start();
 // leftovers from a crash mid-place
 fs.getTemporaryFolder().then(async (t) => {
   for (const e of await t.getEntries()) if (e.name.startsWith("ps_clean_")) await e.delete();
 }).catch(() => {});
 
-function status(msg) { $("status").textContent = msg; }
-function fail(e) { status("Error: " + (e.message || e)); }
+function status(msg, err) { $("status").textContent = msg; $("status").className = "status" + (err ? " err" : ""); }
+function fail(e) { status(e.message || String(e), true); }
+function conn(ok, text) { $("dot").className = "dot " + (ok ? "ok" : "off"); $("connText").textContent = text; }
 const baseUrl = () => $("url").value.replace(/\/+$/, "");
 const modal = (fn, name = "Comfy Clean") => core.executeAsModal(fn, { commandName: name });
 const play = (cmds) => action.batchPlay(cmds, {});
@@ -62,26 +96,54 @@ const clampRect = (b, doc) => ({
   right: Math.min(doc.width, Math.ceil(b.right)), bottom: Math.min(doc.height, Math.ceil(b.bottom)),
 });
 
-// options carry the loader node class so .safetensors and .gguf both work
+// model list = every Klein / Kontext / Fill file ComfyUI can load (GGUF, safetensors, Nunchaku);
+// text encoder and VAE default to "Auto" = picked per model family by models.js
 async function loadModels() {
-  const info = await json(fetch(baseUrl() + "/object_info"));
-  const fill = (sel, loaders, fallback) => {
+  try { objectInfo = await json(fetch(baseUrl() + "/object_info")); } catch (e) {
+    conn(false, "ComfyUI offline");
+    throw new Error("ComfyUI not reachable. Start it, or check the URL in Settings.");
+  }
+  const fill = (sel, items, auto) => {
+    const prev = sel.value; // keep an unsaved pick when testing the connection
     sel.innerHTML = "";
-    for (const cls of loaders) {
-      if (!info[cls]) continue;
-      const req = info[cls].input.required, spec = req[Object.keys(req)[0]];
-      for (const name of Array.isArray(spec[0]) ? spec[0] : (spec[1] && spec[1].options) || []) {
-        const o = document.createElement("option");
-        o.value = name; o.textContent = name; o.dataset.cls = cls;
-        sel.appendChild(o);
-      }
+    if (auto) items = [{ value: models.AUTO, label: "Auto" }].concat(items);
+    for (const it of items) {
+      const o = document.createElement("option");
+      o.value = it.value; o.textContent = it.label;
+      sel.appendChild(o);
     }
-    sel.value = load(sel.id) || fallback;
+    sel.value = prev || load(sel.id) || (auto ? models.AUTO : "flux-2-klein-9b-Q4_K_S.gguf");
     if (sel.selectedIndex < 0) sel.selectedIndex = 0;
   };
-  fill($("model"), ["UnetLoaderGGUF", "UNETLoader"], "flux-2-klein-9b-Q4_K_S.gguf");
-  fill($("clip"), ["CLIPLoaderGGUF", "CLIPLoader"], "Qwen3-8B-Q4_K_M.gguf");
-  status("Models loaded. Make a selection, then click Clean.");
+  const tag = { flux2: "Klein", kontext: "Kontext", fill: "Fill" };
+  const list = models.listModels(objectInfo);
+  if (!list.length) throw new Error("No Flux.2 Klein, Kontext or Fill model found in ComfyUI.");
+  fill($("model"), list.map((m) => ({ value: m.name, label: `${m.name}  (${tag[m.family]}${m.nunchaku ? ", Nunchaku" : ""})` })));
+  fill($("clip"), models.encoderList(objectInfo).map((n) => ({ value: n, label: n })), true);
+  fill($("vae"), models.vaeList(objectInfo).map((n) => ({ value: n, label: n })), true);
+  showAutoPicks();
+  conn(true, $("model").value.replace(/\.(gguf|safetensors)$/, ""));
+  status("Make a selection, then click " + ($("mode").value === "edit" ? "Edit." : "Clean."));
+}
+
+function showAutoPicks() {
+  if (!objectInfo) return;
+  try {
+    const r = models.resolve(objectInfo, { model: $("model").value, clip: $("clip").value, vae: $("vae").value });
+    $("autoHint").textContent = `Uses: ${r.enc.main}${r.enc.clipL ? " + " + r.enc.clipL : ""} \u00b7 ${r.vae}`;
+    $("autoHint").className = "hint";
+  } catch (e) {
+    $("autoHint").textContent = e.message;
+    $("autoHint").className = "hint err";
+  }
+}
+
+async function loadTemplates() {
+  if (templates) return templates;
+  const dir = await (await fs.getPluginFolder()).getEntry("workflows");
+  const t = {};
+  for (const name of models.TEMPLATES) t[name] = JSON.parse(await (await dir.getEntry(name + ".json")).read());
+  return (templates = t);
 }
 
 // ---------- jobs ----------
@@ -94,6 +156,12 @@ async function clean() {
 
   const edit = $("mode").value === "edit";
   const pad = +$("pad").value || 0;
+  if (!objectInfo) await loadModels();
+  // build first so a bad model/encoder/mode combo fails before touching the document
+  const wf = models.buildGraph(objectInfo, await loadTemplates(), {
+    model: $("model").value, clip: $("clip").value, vae: $("vae").value, steps: +$("steps").value || 0,
+    edit, prompt: $("prompt").value.trim(), seed: Math.floor(Math.random() * 2 ** 31), image: "", mask: "",
+  });
   // Only this crop goes to ComfyUI, so page height doesn't matter.
   // clean: full page width, selection's height band + context above/below. edit: just the selection box.
   const rect = edit ? clampRect(sel, doc)
@@ -130,22 +198,14 @@ async function clean() {
     });
 
     job.state = "uploading"; render();
-    // node ids match plugin/workflow.json: 1 = model, 2 = text encoder, 4 = image, 20 = mask, 7 = prompt, 15 = seed
-    const wf = JSON.parse(await (await (await fs.getPluginFolder()).getEntry("workflow.json")).read());
+    // template node ids: 4 = image, 20 = mask (clean templates only)
     wf["4"].inputs.image = await upload(job.base, job.id + ".jpg", jpeg);
-    wf["7"].inputs.text = job.prompt;
-    wf["15"].inputs.noise_seed = Math.floor(Math.random() * 2 ** 31);
-    const model = $("model").selectedOptions[0], clip = $("clip").selectedOptions[0];
-    if (model) wf["1"] = model.dataset.cls === "UNETLoader"
-      ? { class_type: "UNETLoader", inputs: { unet_name: model.value, weight_dtype: "default" } }
-      : { class_type: "UnetLoaderGGUF", inputs: { unet_name: model.value } };
-    if (clip) wf["2"] = { class_type: clip.dataset.cls, inputs: { clip_name: clip.value, type: "flux2" } };
-    if (edit) toEditGraph(wf);
-    else wf["20"].inputs.image = await upload(job.base, job.id + "_mask.jpg", await maskJpeg(job));
+    if (wf["20"]) wf["20"].inputs.image = await upload(job.base, job.id + "_mask.jpg", await maskJpeg(job));
     if (job.cancelled) throw new Error("Cancelled");
 
     connectWs(job.base);
     job.wf = wf;
+    job.sampler = Object.keys(wf).find((id) => /^(KSampler|SamplerCustomAdvanced)$/.test(wf[id].class_type)); // for the stuck watchdog
     job.retries = 0;
     await submit(job, false);
     const img = await waitResult(job);
@@ -160,15 +220,6 @@ async function clean() {
   } finally {
     render();
   }
-}
-
-// edit mode: no mask, no color match -- plain Flux.2 Klein edit of the whole crop.
-// mirrored in tests/test_workflow.py, keep in sync
-function toEditGraph(wf) {
-  for (const n of ["20", "21", "22", "23"]) delete wf[n];
-  wf["16"] = { class_type: "EmptyFlux2LatentImage", inputs: { width: ["6", 0], height: ["6", 1], batch_size: 1 } };
-  wf["17"].inputs.latent_image = ["16", 0];
-  wf["19"].inputs.images = ["18", 0];
 }
 
 async function maskJpeg(job) {
@@ -238,7 +289,7 @@ function connectWs(base) {
     if (!job || job.state === "ready" || job.state === "error") return;
     if (m.type === "executing" || m.type === "execution_start") job.state = "running";
     // stuck-watchdog clock: starts when the sampler node starts, resets on every step
-    if (m.type === "executing") { job.sampling = d.node === "17"; job.tick = Date.now(); }
+    if (m.type === "executing") { job.sampling = d.node === job.sampler; job.tick = Date.now(); }
     if (m.type === "progress") { job.state = "running"; job.progress = `${d.value}/${d.max}`; job.tick = Date.now(); }
     render();
   };
@@ -331,36 +382,58 @@ async function discardPreview(dropJob) {
 
 // ---------- UI ----------
 
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
 function render() {
-  $("previewBar").style.display = preview ? "flex" : "none";
-  $("go").textContent = $("mode").value === "edit" ? "Edit selection" : "Clean selection";
+  const edit = $("mode").value === "edit";
+  for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === $("mode").value ? "on" : "";
+  $("modeHint").textContent = edit
+    ? "Regenerates the whole selection from the prompt."
+    : "Selection is the mask. A full-width strip around it is sent as context.";
+  $("go").textContent = edit ? "Edit selection" : "Clean selection";
+  for (const c of chips) c.className = "chip" + (c.dataset.p === $("prompt").value.trim() ? " on" : "");
+  $("previewBar").className = "preview-bar" + (preview ? "" : " hidden");
+  $("count").textContent = jobs.length;
+
   const box = $("jobs");
   box.innerHTML = "";
+  if (!jobs.length) box.appendChild(el("div", "empty", "Results show up here. Click one to preview it in place."));
   for (const job of jobs) {
-    const el = document.createElement("div");
-    el.className = "job" + (job.state === "ready" ? " ready" : "") + (preview && preview.job === job ? " active" : "");
-    if (job.thumb) { const img = document.createElement("img"); img.src = job.thumb; el.appendChild(img); }
-    const txt = document.createElement("div");
-    txt.className = "txt";
-    const title = document.createElement("div");
-    title.textContent = (job.edit ? "Edit: " : "") + job.prompt.slice(0, 50);
-    const sub = document.createElement("div");
-    sub.className = "sub";
-    sub.textContent = job.docName + " · " + stateText(job);
-    txt.appendChild(title); txt.appendChild(sub); el.appendChild(txt);
+    const active = preview && preview.job === job;
+    const row = el("div", "job" + (job.state === "ready" ? " ready" : "") + (active ? " active" : ""));
+    if (job.thumb) { const img = el("img", "thumb"); img.src = job.thumb; row.appendChild(img); }
+    else row.appendChild(el("div", "thumb"));
 
-    const x = document.createElement("button");
-    x.textContent = "✕";
+    const txt = el("div", "txt");
+    const title = el("div", "title");
+    title.appendChild(el("span", "tag", job.edit ? "EDIT" : "CLEAN"));
+    title.appendChild(document.createTextNode(job.prompt));
+    txt.appendChild(title);
+    txt.appendChild(el("div", "sub" + (job.state === "error" ? " err" : job.state === "ready" ? " okc" : ""), job.docName + " \u00b7 " + stateText(job)));
+    if (!["ready", "error"].includes(job.state)) {
+      const bar = el("div", "bar"), fill = el("div");
+      const [v, m] = (job.progress || "0/1").split("/").map(Number);
+      fill.style.width = (job.state === "running" ? Math.max(4, Math.round(100 * v / m)) : 0) + "%";
+      bar.appendChild(fill); txt.appendChild(bar);
+    }
+    row.appendChild(txt);
+
+    const x = el("div", "x", "\u2715");
     x.title = job.state === "ready" || job.state === "error" ? "Remove" : "Cancel";
     x.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (preview && preview.job === job) discardPreview(true).catch(fail);
+      if (active) discardPreview(true).catch(fail);
       else if (job.state === "ready" || job.state === "error") removeJob(job);
       else cancelJob(job).catch(fail);
     });
-    el.appendChild(x);
-    if (job.state === "ready") el.addEventListener("click", () => showPreview(job).catch(fail));
-    box.appendChild(el);
+    row.appendChild(x);
+    if (job.state === "ready") row.addEventListener("click", () => showPreview(job).catch(fail));
+    box.appendChild(row);
   }
 }
 
@@ -369,7 +442,7 @@ function stateText(job) {
   if (job.state === "queued") return job.queuePos ? `queued #${job.queuePos}` : "queued";
   if (job.state === "retrying") return `stuck, retrying (${job.retries}/2)...`;
   if (job.state === "running") return job.progress ? `step ${job.progress}` : "running...";
-  if (job.state === "ready") return preview && preview.job === job ? "previewing" : "ready - click to preview";
+  if (job.state === "ready") return preview && preview.job === job ? "previewing" : "ready \u00b7 click to preview";
   if (job.state === "error") return "error: " + job.error;
   return job.state + "..." + (job.retries ? ` (retry ${job.retries})` : "");
 }
