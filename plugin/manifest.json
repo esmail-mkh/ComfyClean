@@ -44,6 +44,14 @@
     "network": {
       "domains": "all"
     },
-    "localFileSystem": "plugin"
+    "localFileSystem": "fullAccess",
+    "launchProcess": {
+      "schemes": [
+        "https"
+      ],
+      "extensions": [
+        ".vbs"
+      ]
+    }
   }
 }

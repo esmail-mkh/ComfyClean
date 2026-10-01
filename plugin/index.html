@@ -161,6 +161,14 @@
     <div class="group">
       <div class="label">Connection</div>
       <div class="field"><div class="k">ComfyUI URL</div><input id="url" value="http://127.0.0.1:8188"></div>
+      <div class="field">
+        <div class="k">ComfyUI folder (to start it automatically)</div>
+        <div class="pair">
+          <div class="grow"><input id="comfyDir" placeholder="e.g. M:\ComfyUI_windows_portable"></div>
+          <div class="sp"></div>
+          <sp-button id="browseComfy" variant="secondary" style="width:auto">Browse</sp-button>
+        </div>
+      </div>
       <div class="field"><sp-button id="reload" variant="secondary">Test connection</sp-button></div>
     </div>
     <div class="field"><sp-button id="saveSettings" variant="cta">Save</sp-button></div>

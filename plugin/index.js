@@ -5,7 +5,7 @@ const models = require("./models.js");
 
 const $ = (id) => document.getElementById(id);
 const MAIN_FIELDS = ["mode", "prompt"]; // auto-saved as you use them
-const SETTINGS = ["pad", "stuck", "url", "model", "clip", "vae", "steps", "colorMatch"]; // saved with the Save button
+const SETTINGS = ["pad", "stuck", "url", "comfyDir", "model", "clip", "vae", "steps", "colorMatch"]; // saved with the Save button
 const CLIENT = "ps_clean_" + Date.now();
 const SRGB = "sRGB IEC61966-2.1";
 const jobs = []; // newest first. Results live only in memory: gone when Photoshop closes.
@@ -14,10 +14,12 @@ let jobSeq = 0;
 let ws = null;
 let objectInfo = null; // ComfyUI /object_info, cached by loadModels
 let templates = null; // plugin/workflows/*.json
+let starting = null; // shared promise while the plugin is starting ComfyUI
 
 // "Clean selection" is also a Plugins-menu command, so it can get a keyboard shortcut
 uxp.entrypoints.setup({
-  commands: { clean: () => clean().catch(fail) },
+  // from a shortcut the panel may be hidden, so problems also get an alert
+  commands: { clean: () => clean().catch((e) => { fail(e); app.showAlert(e.message || String(e)); }) },
   panels: {
     main: {
       show(node) { if (node && node !== document.body && !node.contains($("app"))) node.appendChild($("app")); },
@@ -72,6 +74,10 @@ $("saveSettings").addEventListener("click", async () => {
   } catch (e) {
     $("saveMsg").textContent = e.message || String(e);
   }
+});
+$("browseComfy").addEventListener("click", async () => {
+  const folder = await fs.getFolder();
+  if (folder) $("comfyDir").value = folder.nativePath;
 });
 $("reload").addEventListener("click", () => loadModels().then(() => { $("saveMsg").textContent = "Connected."; })
   .catch((e) => { $("saveMsg").textContent = e.message || String(e); }));
@@ -156,13 +162,7 @@ async function clean() {
 
   const edit = $("mode").value === "edit";
   const pad = +$("pad").value || 0;
-  if (!objectInfo) await loadModels();
-  // build first so a bad model/encoder/mode combo fails before touching the document
-  const wf = models.buildGraph(objectInfo, await loadTemplates(), {
-    model: $("model").value, clip: $("clip").value, vae: $("vae").value, steps: +$("steps").value || 0,
-    colorMatch: Math.min(1, Math.max(0, $("colorMatch").value === "" ? 1 : +$("colorMatch").value || 0)),
-    edit, prompt: $("prompt").value.trim(), seed: Math.floor(Math.random() * 2 ** 31), image: "", mask: "",
-  });
+  showPanel();
   // Only this crop goes to ComfyUI, so page height doesn't matter.
   // clean: full page width, selection's height band + context above/below. edit: just the selection box.
   const rect = edit ? clampRect(sel, doc)
@@ -198,6 +198,16 @@ async function clean() {
       }
     });
 
+    // selection is captured; now make sure ComfyUI is up (may start it) and build the graph
+    await ensureComfy(job);
+    if (!objectInfo) await loadModels();
+    const wf = models.buildGraph(objectInfo, await loadTemplates(), {
+      model: $("model").value || load("model"), clip: $("clip").value || load("clip") || models.AUTO,
+      vae: $("vae").value || load("vae") || models.AUTO, steps: +$("steps").value || 0,
+      colorMatch: Math.min(1, Math.max(0, $("colorMatch").value === "" ? 1 : +$("colorMatch").value || 0)),
+      edit, prompt: job.prompt, seed: Math.floor(Math.random() * 2 ** 31), image: "", mask: "",
+    });
+
     job.state = "uploading"; render();
     // template node ids: 4 = image, 20 = mask (clean templates only)
     wf["4"].inputs.image = await upload(job.base, job.id + ".jpg", jpeg);
@@ -221,6 +231,69 @@ async function clean() {
   } finally {
     render();
   }
+}
+
+// ---------- starting ComfyUI ----------
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function showPanel() {
+  try { uxp.entrypoints.getPanel("main").show(); } catch (e) {} // not in every Photoshop version
+}
+
+async function reachable(base) {
+  try {
+    const r = await Promise.race([fetch(base + "/system_stats"), sleep(3000).then(() => { throw new Error("timeout"); })]);
+    return r.ok;
+  } catch (e) { return false; }
+}
+
+async function ensureComfy(job) {
+  if (await reachable(job.base)) return;
+  objectInfo = null;
+  const dir = $("comfyDir").value.trim().replace(/[\\/]+$/, "");
+  if (!dir) throw new Error("ComfyUI isn't running. Start it, or set the ComfyUI folder in Settings so the plugin can start it.");
+  job.state = "starting"; render();
+  if (!starting) starting = startComfy(dir, job.base).finally(() => { starting = null; });
+  await starting;
+}
+
+const fileExists = async (path) => {
+  try { await fs.getEntryWithUrl("file:/" + path.replace(/\\/g, "/")); return true; } catch (e) { return false; }
+};
+
+// works with the portable build (folder with python_embeded, or its inner ComfyUI folder) and venv installs
+async function comfyCommand(dir) {
+  const parent = dir.replace(/[\\/][^\\/]+$/, "");
+  if (await fileExists(`${dir}\\python_embeded\\python.exe`) && await fileExists(`${dir}\\ComfyUI\\main.py`)) {
+    return { cwd: dir, python: `${dir}\\python_embeded\\python.exe`, main: `${dir}\\ComfyUI\\main.py`, flags: "-s" };
+  }
+  if (await fileExists(`${dir}\\main.py`)) {
+    if (await fileExists(`${parent}\\python_embeded\\python.exe`)) return { cwd: parent, python: `${parent}\\python_embeded\\python.exe`, main: `${dir}\\main.py`, flags: "-s" };
+    for (const venv of ["venv", ".venv"]) {
+      if (await fileExists(`${dir}\\${venv}\\Scripts\\python.exe`)) return { cwd: dir, python: `${dir}\\${venv}\\Scripts\\python.exe`, main: `${dir}\\main.py`, flags: "" };
+    }
+    return { cwd: dir, python: "python", main: `${dir}\\main.py`, flags: "" };
+  }
+  throw new Error(`No ComfyUI found in "${dir}". Pick the ComfyUI_windows_portable folder (or the folder with main.py).`);
+}
+
+// no browser tab (--disable-auto-launch, no --windows-standalone-build), console window minimized (Run style 7)
+async function startComfy(dir, base) {
+  conn(false, "Starting ComfyUI...");
+  const c = await comfyCommand(dir);
+  const q = (str) => str.replace(/"/g, '""');
+  const line = `"${c.python}" ${c.flags} "${c.main}" --disable-auto-launch`;
+  const vbs = await (await fs.getDataFolder()).createFile("start_comfyui.vbs", { overwrite: true });
+  await vbs.write(`Set sh = CreateObject("WScript.Shell")\r\nsh.CurrentDirectory = "${q(c.cwd)}"\r\nsh.Run "${q(line)}", 7, False\r\n`);
+  const err = await uxp.shell.openPath(vbs.nativePath, "Starts ComfyUI minimized so Comfy Clean can use it.");
+  if (err) throw new Error("Couldn't start ComfyUI: " + err);
+  for (let t = 0; t < 180; t += 2) {
+    await sleep(2000);
+    if (await reachable(base)) { await loadModels().catch(() => {}); return; }
+  }
+  conn(false, "ComfyUI offline");
+  throw new Error("ComfyUI didn't come up within 3 minutes. Check its window (taskbar) for errors.");
 }
 
 async function maskJpeg(job) {
@@ -440,6 +513,7 @@ function render() {
 
 function stateText(job) {
   if (job.cancelled) return "cancelling...";
+  if (job.state === "starting") return "starting ComfyUI...";
   if (job.state === "queued") return job.queuePos ? `queued #${job.queuePos}` : "queued";
   if (job.state === "retrying") return `stuck, retrying (${job.retries}/2)...`;
   if (job.state === "running") return job.progress ? `step ${job.progress}` : "running...";
