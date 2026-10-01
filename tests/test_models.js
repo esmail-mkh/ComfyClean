@@ -63,6 +63,18 @@ assert.deepStrictEqual(g["1"], { class_type: "NunchakuFluxDiTLoader", inputs: { 
 g = build(fake, "flux-2-klein-9b-Q4_K_S.gguf", false, { clip: "Qwen3-4B-Q5_K_M.gguf", vae: "ae.safetensors" });
 assert.deepStrictEqual([g["2"].inputs.clip_name, g["3"].inputs.vae_name], ["Qwen3-4B-Q5_K_M.gguf", "ae.safetensors"]);
 
+// color match: masked node when available, ColorTransfer fallback, 0 = off
+const withCM = { ...fake, INPAINT_ColorMatch: { input: { required: {} } } };
+g = build(withCM, "flux-2-klein-9b-Q4_K_S.gguf", false, { colorMatch: 0.7 });
+assert.deepStrictEqual(g["23"], { class_type: "INPAINT_ColorMatch", inputs: { target: ["18", 0], reference: ["5", 0], exclude_mask: ["20", 0], strength: 0.7 } });
+assert.ok(!g["22"]);
+checkLinks(g, "masked color match");
+g = build(fake, "flux-2-klein-9b-Q4_K_S.gguf", false, { colorMatch: 0.5 });
+assert.deepStrictEqual([g["23"].class_type, g["23"].inputs.strength], ["ColorTransfer", 0.5]);
+g = build(withCM, "flux-2-klein-9b-Q4_K_S.gguf", false, { colorMatch: 0 });
+assert.ok(!g["23"] && !g["22"]);
+assert.deepStrictEqual(g["19"].inputs.images, ["18", 0]);
+
 // every family x mode builds and all links resolve
 for (const [model, modes] of [["flux-2-klein-9b-Q4_K_S.gguf", [false, true]], ["flux1-kontext-dev-fp8.safetensors", [false, true]], ["flux1-fill-dev-Q4_K.gguf", [false]]]) {
   for (const edit of modes) checkLinks(build(fake, model, edit), `${model} edit=${edit}`);

@@ -152,7 +152,11 @@
         <div class="sp"></div>
         <div class="field"><div class="k">Context above/below (px)</div><input id="pad" type="number" value="96"></div>
       </div>
-      <div class="field"><div class="k">Auto-retry if a step takes longer than (s, 0 = off)</div><input id="stuck" type="number" value="30"></div>
+      <div class="pair">
+        <div class="field"><div class="k">Color match (0-1, Clean only)</div><input id="colorMatch" type="number" value="1" min="0" max="1" step="0.1"></div>
+        <div class="sp"></div>
+        <div class="field"><div class="k">Auto-retry after (s/step, 0 = off)</div><input id="stuck" type="number" value="30"></div>
+      </div>
     </div>
     <div class="group">
       <div class="label">Connection</div>

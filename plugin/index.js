@@ -5,7 +5,7 @@ const models = require("./models.js");
 
 const $ = (id) => document.getElementById(id);
 const MAIN_FIELDS = ["mode", "prompt"]; // auto-saved as you use them
-const SETTINGS = ["pad", "stuck", "url", "model", "clip", "vae", "steps"]; // saved with the Save button
+const SETTINGS = ["pad", "stuck", "url", "model", "clip", "vae", "steps", "colorMatch"]; // saved with the Save button
 const CLIENT = "ps_clean_" + Date.now();
 const SRGB = "sRGB IEC61966-2.1";
 const jobs = []; // newest first. Results live only in memory: gone when Photoshop closes.
@@ -160,6 +160,7 @@ async function clean() {
   // build first so a bad model/encoder/mode combo fails before touching the document
   const wf = models.buildGraph(objectInfo, await loadTemplates(), {
     model: $("model").value, clip: $("clip").value, vae: $("vae").value, steps: +$("steps").value || 0,
+    colorMatch: Math.min(1, Math.max(0, $("colorMatch").value === "" ? 1 : +$("colorMatch").value || 0)),
     edit, prompt: $("prompt").value.trim(), seed: Math.floor(Math.random() * 2 ** 31), image: "", mask: "",
   });
   // Only this crop goes to ComfyUI, so page height doesn't matter.

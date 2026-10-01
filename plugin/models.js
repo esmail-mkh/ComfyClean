@@ -80,7 +80,7 @@ function withDefaults(info, node) {
   return node;
 }
 
-// opts: { model, clip, vae, steps, edit, image, mask, prompt, seed }
+// opts: { model, clip, vae, steps, colorMatch (0-1), edit, image, mask, prompt, seed }
 function buildGraph(info, templates, opts) {
   const { model, enc, vae } = resolve(info, opts);
   if (opts.edit && model.family === "fill") throw new Error("Fill models only inpaint. Use Clean mode, or an edit model (Klein / Kontext) for Edit.");
@@ -98,12 +98,25 @@ function buildGraph(info, templates, opts) {
   g["4"].inputs.image = opts.image;
   if (g["20"]) g["20"].inputs.image = opts.mask;
   g["7"].inputs.text = opts.prompt;
+  applyColorMatch(info, g, opts.colorMatch === undefined ? 1 : opts.colorMatch);
   for (const n of Object.values(g)) {
     if ("noise_seed" in n.inputs) n.inputs.noise_seed = opts.seed;
     if (n.class_type === "KSampler") n.inputs.seed = opts.seed;
     if (opts.steps > 0 && typeof n.inputs.steps === "number") n.inputs.steps = opts.steps;
   }
   return g;
+}
+
+// Clean templates end in 22 (composite) -> 23 (ColorTransfer) -> 19 (output).
+// With comfyui-inpaint-nodes, use its masked color match instead (krita-ai-diffusion does the same):
+// LAB mean/std taken only from pixels outside the selection, so the removed text can't skew it.
+function applyColorMatch(info, g, strength) {
+  if (!g["23"]) return;
+  if (strength <= 0) { delete g["22"]; delete g["23"]; g["19"].inputs.images = ["18", 0]; return; }
+  if (info.INPAINT_ColorMatch) {
+    delete g["22"];
+    g["23"] = { class_type: "INPAINT_ColorMatch", inputs: { target: ["18", 0], reference: ["5", 0], exclude_mask: ["20", 0], strength } };
+  } else g["23"].inputs.strength = strength;
 }
 
 module.exports = { AUTO, TEMPLATES, family, listModels, encoderList, vaeList, pickEncoders, pickVae, resolve, buildGraph };
