@@ -1,7 +1,7 @@
 """Runs the plugin's graphs (built by plugin/models.js) against a live ComfyUI the same way the plugin does:
 crop + selection mask in, result composited back through the mask, then checks the
 cleaned area matches the known clean background (no darker/lighter patch).
-Usage: python tests/test_workflow.py [--edit] [--model NAME] [--steps N]  (ComfyUI must be running on 127.0.0.1:8188)"""
+Usage: python tests/test_workflow.py [--edit] [--model NAME] [--steps N] [--scene bubble] [--prompt TEXT]  (ComfyUI must be running on 127.0.0.1:8188)"""
 import json, random, subprocess, sys, time, urllib.parse, urllib.request, uuid
 from pathlib import Path
 import numpy as np
@@ -11,6 +11,24 @@ URL = "http://127.0.0.1:8188"
 ROOT = Path(__file__).parent
 TMP = ROOT / "tmp"
 TMP.mkdir(exist_ok=True)
+
+
+def make_bubble_scene():
+    """Speech bubble with dialogue on a screentone-ish background; the selection is a box around the text."""
+    gt, _, _ = make_scene()
+    d = ImageDraw.Draw(gt)
+    d.ellipse((110, 90, 590, 410), fill="white", outline="black", width=5)
+    d.polygon([(420, 380), (500, 470), (460, 370)], fill="white", outline="black")
+    d.ellipse((110, 90, 590, 410), outline="black", width=5)
+    src = gt.copy()
+    d = ImageDraw.Draw(src)
+    font = ImageFont.truetype("arialbd.ttf", 34)
+    text = "WAIT! YOU CAN'T\nJUST LEAVE ME\nHERE ALONE!"
+    box = d.multiline_textbbox((350, 250), text, font=font, anchor="mm", align="center")
+    d.multiline_text((350, 250), text, fill="black", font=font, anchor="mm", align="center")
+    mask = Image.new("L", src.size, 0)
+    ImageDraw.Draw(mask).rectangle([box[0] - 8, box[1] - 8, box[2] + 8, box[3] + 8], fill=255)
+    return gt, src, mask
 
 
 def make_scene():
@@ -82,12 +100,15 @@ def test_edit(src):
 
 
 if __name__ == "__main__":
-    gt, src, mask = make_scene()
+    bubble = "--scene" in sys.argv and sys.argv[sys.argv.index("--scene") + 1] == "bubble"
+    gt, src, mask = make_bubble_scene() if bubble else make_scene()
+    PROMPT = sys.argv[sys.argv.index("--prompt") + 1] if "--prompt" in sys.argv else \
+        "remove the sound effect lettering, restore the background art behind it"
     if "--edit" in sys.argv:
         test_edit(src)
         sys.exit(print("ok"))
     t = time.time()
-    out = run(src, mask, "remove the sound effect lettering, restore the background art behind it")
+    out = run(src, mask, PROMPT)
     out = out.resize(src.size, Image.LANCZOS)  # plugin scales the layer back to the crop size
     final = Image.composite(out, src, mask)    # plugin applies the selection as a layer mask
 

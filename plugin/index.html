@@ -49,6 +49,14 @@
   .chip { margin: 2px; padding: 4px 9px; border-radius: 11px; border: 1px solid var(--line); background: var(--card); font-size: 11px; }
   .chip:hover { background: var(--card-hover); }
   .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+  .chip .del { display: none; margin-left: 5px; color: var(--muted); }
+  .chip:hover .del { display: inline; }
+  .chip .del:hover { color: var(--err); }
+  .chip.add { padding: 4px 10px; color: var(--muted); border-style: dashed; }
+  .preset-add { margin-top: 8px; padding: 8px; border-radius: 6px; background: var(--card); border: 1px solid var(--line); }
+  .preset-add .row { margin-top: 6px; }
+  .preset-add sp-button { flex: 1; }
+  .preset-add .sp { width: 8px; }
   textarea { width: 100%; height: 56px; margin-top: 8px; }
   select, input { width: 100%; }
 
@@ -113,12 +121,14 @@
   <div class="hint" id="modeHint"></div>
 
   <div class="label">Prompt</div>
-  <div class="chips" id="presets">
-    <div class="chip" data-p="remove all text">Text</div>
-    <div class="chip" data-p="remove all text, keep the speech bubble and its background clean">Text, keep bubble</div>
-    <div class="chip" data-p="remove the text and the speech bubble, restore the background art behind it">Text + bubble</div>
-    <div class="chip" data-p="remove the sound effect lettering, restore the background art behind it">SFX</div>
-    <div class="chip" data-p="remove the object, fill with matching background">Object</div>
+  <div class="chips" id="presets"></div>
+  <div id="presetAdd" class="preset-add hidden">
+    <input id="presetName" placeholder="Name for the current prompt">
+    <div class="row">
+      <sp-button id="presetSave" variant="cta">Save preset</sp-button>
+      <div class="sp"></div>
+      <sp-button id="presetCancel" variant="secondary">Cancel</sp-button>
+    </div>
   </div>
   <textarea id="prompt" placeholder="Describe what to do with the selection"></textarea>
 

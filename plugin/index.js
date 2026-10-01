@@ -16,6 +16,16 @@ let objectInfo = null; // ComfyUI /object_info, cached by loadModels
 let templates = null; // plugin/workflows/*.json
 let starting = null; // shared promise while the plugin is starting ComfyUI
 
+// first-run presets; after that the user's list lives in settings.json (cfg.presets)
+const DEFAULT_PRESETS = [
+  { name: "Text, keep bubble", prompt: "Remove all text and lettering. Keep the speech bubble exactly as it is: same shape, outline, tail and white fill. Fill where the text was with the same clean background as the rest of the bubble. Do not change anything else; keep every line, color and detail identical." },
+  { name: "Text", prompt: "Remove all text and lettering. Fill where the text was with the background around it, matching its color, texture and lines. Do not change anything else." },
+  { name: "Text + bubble", prompt: "Remove the speech bubble and all text in it. Restore the artwork behind it so it continues naturally from the surroundings. Do not change anything else." },
+  { name: "SFX", prompt: "Remove the sound effect lettering. Restore the artwork behind it so it continues naturally from the surroundings, with the same lines, colors and screentone. Do not change anything else." },
+  { name: "Object", prompt: "Remove the selected object. Fill the area with what should be behind it, matching the surroundings. Do not change anything else." },
+];
+const presets = () => cfg.presets || DEFAULT_PRESETS;
+
 // "Clean selection" is also a Plugins-menu command, so it can get a keyboard shortcut
 uxp.entrypoints.setup({
   // from a shortcut the panel may be hidden, so problems also get an alert
@@ -40,13 +50,23 @@ const fillFields = (names) => { for (const f of names) if (load(f) !== null) $(f
 async function start() {
   try { cfg = JSON.parse(await (await (await fs.getDataFolder()).getEntry("settings.json")).read()); } catch (e) { cfg = {}; }
   fillFields(MAIN_FIELDS.concat(SETTINGS));
-  if (!$("prompt").value) $("prompt").value = chips[0].dataset.p;
+  if (!$("prompt").value) $("prompt").value = presets()[0] ? presets()[0].prompt : "";
+  renderPresets();
   render();
   await loadModels().catch(() => {});
 }
 
-const chips = [...document.querySelectorAll("#presets .chip")];
-for (const c of chips) c.addEventListener("click", () => { $("prompt").value = c.dataset.p; save("prompt"); render(); });
+$("presetSave").addEventListener("click", () => {
+  const name = $("presetName").value.trim(), prompt = $("prompt").value.trim();
+  if (!name || !prompt) return status("Type a prompt and a preset name first.", true);
+  cfg.presets = presets().filter((x) => x.name !== name).concat([{ name, prompt }]); // same name = overwrite
+  writeCfg().catch(fail);
+  $("presetName").value = "";
+  $("presetAdd").className = "preset-add hidden";
+  renderPresets();
+  status(`Preset "${name}" saved.`);
+});
+$("presetCancel").addEventListener("click", () => { $("presetAdd").className = "preset-add hidden"; });
 $("prompt").addEventListener("change", () => save("prompt"));
 $("prompt").addEventListener("input", () => render());
 for (const b of document.querySelectorAll("#modeSeg div")) {
@@ -463,6 +483,33 @@ function el(tag, cls, text) {
   return e;
 }
 
+function renderPresets() {
+  const box = $("presets");
+  box.innerHTML = "";
+  for (const pr of presets()) {
+    const c = el("div", "chip", pr.name);
+    c.dataset.p = pr.prompt;
+    c.title = pr.prompt;
+    c.addEventListener("click", () => { $("prompt").value = pr.prompt; save("prompt"); render(); });
+    const del = el("span", "del", "\u00d7");
+    del.title = "Delete preset";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      cfg.presets = presets().filter((x) => x !== pr);
+      writeCfg().catch(fail);
+      renderPresets();
+      status(`Preset "${pr.name}" deleted.`);
+    });
+    c.appendChild(del);
+    box.appendChild(c);
+  }
+  const add = el("div", "chip add", "+");
+  add.title = "Save the current prompt as a preset";
+  add.addEventListener("click", () => { $("presetAdd").className = "preset-add"; $("presetName").focus(); });
+  box.appendChild(add);
+  render();
+}
+
 function render() {
   const edit = $("mode").value === "edit";
   for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === $("mode").value ? "on" : "";
@@ -470,7 +517,9 @@ function render() {
     ? "Regenerates the whole selection from the prompt."
     : "Selection is the mask. A full-width strip around it is sent as context.";
   $("go").textContent = edit ? "Edit selection" : "Clean selection";
-  for (const c of chips) c.className = "chip" + (c.dataset.p === $("prompt").value.trim() ? " on" : "");
+  for (const c of document.querySelectorAll("#presets .chip")) {
+    if (c.dataset.p !== undefined) c.className = "chip" + (c.dataset.p === $("prompt").value.trim() ? " on" : "");
+  }
   $("previewBar").className = "preview-bar" + (preview ? "" : " hidden");
   $("count").textContent = jobs.length;
 
