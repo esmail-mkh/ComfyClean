@@ -41,7 +41,7 @@ uxp.entrypoints.setup({
   commands: { clean: () => clean().catch((e) => { fail(e); app.showAlert(e.message || String(e)); }) },
   panels: {
     main: {
-      show(node) { if (node && node !== document.body && !node.contains($("app"))) node.appendChild($("app")); rememberPanel(true); },
+      show(node) { if (node && node !== document.body && !node.contains($("app"))) node.appendChild($("app")); rememberPanel(true); render(); }, // render: catch up on documents switched meanwhile
       hide() { rememberPanel(false); },
     },
   },
@@ -301,6 +301,7 @@ async function clean() {
   const job = {
     id: `ps_clean_${Date.now()}_${++jobSeq}`, docId: doc.id, docName: doc.title, base: baseUrl(), time: new Date(),
     prompt: $("prompt").value.trim(), edit, rect, w: rect.right - rect.left, h: rect.bottom - rect.top, state: "reading",
+    area: sel, // the selection's box: clicking the result scrolls the view to it
   };
   jobs.unshift(job);
   render();
@@ -736,6 +737,26 @@ async function placePreview(job) {
   render();
 }
 
+// Scrolls the canvas so the result's area is in the middle of the view; the zoom stays as it is. Photoshop has no
+// API for this: "set document.center" takes the view center in screen pixels from the canvas' top-left
+// (= document pixels x zoom). Only on a click in the list, never on an automatic preview.
+// ponytail: undocumented descriptor (Adobe forum, works since CC 2018); if it fails the view just stays put
+async function scrollToArea(job) {
+  const doc = findDoc(job.docId), a = job.area;
+  if (!doc || !a || activeDocId() !== job.docId) return;
+  try {
+    let z = doc.zoom; // percent, Photoshop 2024+
+    if (z) z /= 100;
+    else { // older: zoom as a fraction
+      const [r] = await play([{ _obj: "get", _target: [{ _property: "zoom" }, { _ref: "document", _id: doc.id }] }]);
+      z = typeof r.zoom === "object" ? r.zoom._value : r.zoom;
+    }
+    const at = (v) => ({ _unit: "distanceUnit", _value: v * z });
+    await modal(() => play([{ _obj: "set", _target: [{ _ref: "property", _property: "center" }, { _ref: "document", _enum: "ordinal", _value: "targetEnum" }],
+      to: { _obj: "center", horizontal: at((a.left + a.right) / 2), vertical: at((a.top + a.bottom) / 2) } }]));
+  } catch (e) {}
+}
+
 async function applyPreview() {
   if (!preview) return;
   const p = preview;
@@ -865,7 +886,7 @@ function render() {
       else cancelJob(job).catch(fail);
     });
     row.appendChild(x);
-    if (job.state === "ready") row.addEventListener("click", () => showPreview(job).catch(fail));
+    if (job.state === "ready") row.addEventListener("click", () => showPreview(job).then(() => scrollToArea(job)).catch(fail));
     box.appendChild(row);
   }
 }

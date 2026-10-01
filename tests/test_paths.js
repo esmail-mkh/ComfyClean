@@ -34,12 +34,13 @@ async function run(withImaging) {
   global.document = { getElementById: (id) => (els[id] = els[id] || fakeEl()), createElement: fakeEl, querySelectorAll: () => [], body: {} };
   global.fetch = () => Promise.reject(new Error("offline"));
   // a 100x200 document with a selection at 10,20 - 50,60
-  const doc = withOverrides(anything(), { id: 1, width: 100, height: 200, title: "page.psd" });
+  const doc = withOverrides(anything(), { id: 1, width: 100, height: 200, title: "page.psd", zoom: 50 });
   const doc2 = withOverrides(anything(), { id: 2, width: 100, height: 200, title: "page2.psd" });
   const appState = { activeDocument: doc, documents: [doc, doc2] };
   const app = withOverrides(anything(), appState);
   let onEvent = null; // Photoshop's notification listener (document switched / closed)
-  const batchPlay = async (cmds) => cmds.map((c) => (c._obj === "get" && c._target[0]._property === "selection"
+  const sent = []; // every batchPlay command, newest last
+  const batchPlay = async (cmds) => sent.push(...cmds) && cmds.map((c) => (c._obj === "get" && c._target[0]._property === "selection"
     ? { selection: { left: { _value: 10 }, top: { _value: 20 }, right: { _value: 50 }, bottom: { _value: 60 } } } : anything()));
   const getSelection = async ({ sourceBounds: b }) => {
     const w = b.right - b.left, h = b.bottom - b.top;
@@ -53,7 +54,7 @@ async function run(withImaging) {
   const m = new Module(PLUGIN);
   m.filename = PLUGIN;
   m.paths = Module._nodeModulePaths(path.dirname(PLUGIN));
-  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;module.exports = { clean, autoPreview, applyPreview, discardPreview, jobs, legacy, shown: () => preview };", PLUGIN);
+  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;module.exports = { clean, autoPreview, applyPreview, discardPreview, scrollToArea, jobs, legacy, shown: () => preview };", PLUGIN);
   Module._load = load;
   const P = m.exports;
   assert.strictEqual(P.legacy(), !withImaging, "legacy() picks the path from the Imaging API");
@@ -79,6 +80,13 @@ async function run(withImaging) {
   await P.applyPreview(); // Apply -> nothing comes up, even with one waiting
   assert.strictEqual(second.outcome, "applied");
   assert.strictEqual(P.shown(), null, "Apply doesn't show the next result");
+
+  // clicking a result scrolls to its area (selection 10,20 - 50,60) at the current zoom (50%), zoom untouched
+  await P.scrollToArea(job);
+  const scroll = sent.filter((c) => c._obj === "set" && c._target[0]._property === "center").pop();
+  assert.ok(scroll, "view scroll command sent");
+  assert.deepStrictEqual([scroll.to.horizontal._value, scroll.to.vertical._value], [15, 20], "area center x zoom");
+  assert.ok(!sent.some((c) => c._target && c._target[0] && c._target[0]._property === "zoom" && c._obj === "set"), "zoom never set");
 
   // the list follows the document tab; closing a document drops its finished results
   const count = () => els.count.textContent;
