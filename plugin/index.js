@@ -17,6 +17,7 @@ const jobs = [];
 let filter = "all"; // results filter: all | new | applied
 let preview = null; // { job, docId, layerId } -- the result currently shown in its document
 let placing = false; // a preview is being placed right now
+let scrolledFor = null; // the previewed result last scrolled into view in the list
 let jobSeq = 0;
 let ws = null;
 let objectInfo = null; // ComfyUI /object_info, cached by loadModels
@@ -149,8 +150,11 @@ for (const b of document.querySelectorAll("#modeSeg div")) {
   b.addEventListener("click", () => { $("mode").value = b.dataset.v; save("mode"); render(); });
 }
 $("go").addEventListener("click", () => clean().catch(fail));
-$("apply").addEventListener("click", () => applyPreview().catch(fail));
-$("discard").addEventListener("click", () => discardPreview(true).catch(fail));
+// Apply / Discard live on the previewed result's row (render); a preview open in another document shows this line
+$("otherPreview").addEventListener("click", () => {
+  const d = preview && findDoc(preview.docId);
+  if (d) modal(() => { app.activeDocument = d; }).catch(fail); // the document switch re-renders the list
+});
 
 // separate settings page: gear opens it, Save writes the file, Back throws edits away
 const showSettings = (on) => {
@@ -834,10 +838,11 @@ function render() {
   const model = val("model") || load("model");
   $("modelName").textContent = model ? model.replace(/\.(gguf|safetensors)$/, "") : "Not chosen yet, click to pick";
   syncPresetPick();
-  $("previewBar").className = "preview-bar" + (preview ? "" : " hidden");
-  if (preview) $("pvTitle").textContent = "Previewing in " + preview.job.docName;
   // the list shows the active document's results only; it follows the document tabs (see the listener below)
   const docId = activeDocId();
+  const away = !!preview && preview.docId !== docId;
+  $("otherPreview").className = "other-preview" + (away ? "" : " hidden");
+  if (away) $("otherPreview").textContent = `Unfinished preview in ${preview.job.docName}, click to go there`;
   const mine = jobs.filter((j) => j.docId === docId);
   $("count").textContent = String(mine.length); // UXP shows nothing for the number 0
   $("sessionStats").textContent = mine.length
@@ -865,9 +870,9 @@ function render() {
     top.appendChild(el("span", "time", `${pad2(job.time.getHours())}:${pad2(job.time.getMinutes())}`));
     txt.appendChild(top);
     txt.appendChild(el("div", "title", job.prompt));
-    const pill = pillFor(job, active);
     const bottom = el("div", "bottom");
-    bottom.appendChild(el("span", "pill " + pill.cls, pill.text));
+    if (active) bottom.appendChild(previewActions());
+    else { const pill = pillFor(job); bottom.appendChild(el("span", "pill " + pill.cls, pill.text)); }
     txt.appendChild(bottom);
     if (!finished(job)) {
       const bar = el("div", "bar"), fill = el("div");
@@ -888,11 +893,28 @@ function render() {
     row.appendChild(x);
     if (job.state === "ready") row.addEventListener("click", () => showPreview(job).then(() => scrollToArea(job)).catch(fail));
     box.appendChild(row);
+    // a new preview (auto, or after Discard: maybe an older result further down) is brought into view once;
+    // later renders (progress ticks) leave the list where the user scrolled it
+    if (active && scrolledFor !== job) {
+      scrolledFor = job;
+      try { row.scrollIntoView({ block: "nearest" }); } catch (e) {}
+    }
   }
 }
 
-function pillFor(job, active) {
-  if (active) return { cls: "blue", text: "Previewing" };
+function previewActions() {
+  const acts = el("div", "acts");
+  const btn = (cls, text, fn) => {
+    const b = el("div", "btn mini " + cls, text);
+    b.addEventListener("click", (e) => { e.stopPropagation(); fn().catch(fail); }); // not the row's click
+    acts.appendChild(b);
+  };
+  btn("primary", "Apply", applyPreview);
+  btn("ghost", "Discard", () => discardPreview(true));
+  return acts;
+}
+
+function pillFor(job) {
   if (job.state === "error") return { cls: "red", text: "Error: " + job.error };
   if (job.state === "ready") {
     if (job.outcome === "applied") return { cls: "green", text: "Applied \u00b7 click to place again" };

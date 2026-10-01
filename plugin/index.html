@@ -111,14 +111,15 @@
   .btn.primary.big { height: 38px; line-height: 38px; font-size: 13px; }
   .btn.ghost { color: var(--text); background: var(--card-hover); border: 1px solid var(--line); }
   .btn.ghost:hover { border-color: var(--muted); }
-  .btn-row .btn { flex: 1; }
+  /* Apply / Discard on the previewed result's row */
+  .acts { display: flex; margin-top: 1px; }
+  .btn.mini { height: 22px; line-height: 22px; padding: 0 12px; margin-right: 6px; border-radius: 6px; font-size: 11px; letter-spacing: 0; }
   .status { margin-top: 7px; min-height: 14px; font-size: 11px; color: var(--muted); }
   .status.err { color: var(--err); }
 
-  .preview-bar { margin-top: 10px; padding: 10px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent-soft); }
-  .preview-bar .pv { font-weight: bold; margin-bottom: 2px; }
-  .preview-bar .pv-sub { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
-  .preview-bar sp-button { flex: 1; }
+  /* one line, only when the open preview is in another document (its row isn't in this document's list) */
+  .other-preview { margin-top: 8px; height: 24px; line-height: 24px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--accent);
+                   background: var(--accent-soft); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 
   /* results */
   .results-head { display: flex; align-items: center; margin-bottom: 7px; }
@@ -222,15 +223,7 @@
     <div class="go"><div class="btn primary big" id="go">Clean selection</div></div>
     <div class="status" id="status"></div>
 
-    <div id="previewBar" class="preview-bar hidden">
-      <div class="pv" id="pvTitle">Previewing in document</div>
-      <div class="pv-sub">Apply keeps it, Discard removes it.</div>
-      <div class="row btn-row">
-        <div class="btn primary" id="apply">Apply</div>
-        <div class="sp"></div>
-        <div class="btn ghost" id="discard">Discard</div>
-      </div>
-    </div>
+    <div id="otherPreview" class="other-preview hidden" title="Go to that document to Apply or Discard it"></div>
 
     <div class="section" id="results">
       <div class="results-head">

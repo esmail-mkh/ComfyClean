@@ -101,6 +101,14 @@ async function run(withImaging) {
   console.log(`${withImaging ? "imaging" : "2022"} path ok`);
 }
 
+// every $("id") in index.js must exist in index.html: in Photoshop a missing one is null, and a top-level
+// $("x").addEventListener would stop the whole file from loading (the fake DOM above can't notice)
+const fs = require("fs");
+const html = fs.readFileSync(path.join(__dirname, "../plugin/index.html"), "utf8");
+for (const [, id] of fs.readFileSync(PLUGIN, "utf8").matchAll(/\$\("([\w-]+)"\)/g)) {
+  assert.ok(html.includes(`id="${id}"`), `index.js uses #${id}, missing in index.html`);
+}
+
 (async () => {
   await run(true);
   await run(false);
