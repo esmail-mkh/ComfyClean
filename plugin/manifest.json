@@ -102,6 +102,11 @@
         2
       ],
       "theme": [
+        "darkest",
+        "dark",
+        "medium",
+        "lightest",
+        "light",
         "all"
       ],
       "species": [

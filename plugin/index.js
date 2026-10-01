@@ -16,6 +16,7 @@ let preview = null; // { job, docId, layerId } -- the result currently shown in 
 let jobSeq = 0;
 let ws = null;
 let objectInfo = null; // ComfyUI /object_info, cached by loadModels
+let listInfo = null; // what the model pickers show: objectInfo, or the ComfyUI folder scan while ComfyUI is off
 let templates = null; // plugin/workflows/*.json
 let starting = null; // shared promise while the plugin is starting ComfyUI
 
@@ -42,7 +43,8 @@ uxp.entrypoints.setup({
 
 // settings live in a JSON file in the plugin's data folder, so they survive Photoshop restarts
 let cfg = {};
-const load = (f) => (cfg[f] === undefined ? null : cfg[f]);
+// "" = never set (e.g. model before the first Save): Back must not blank the auto-picked model
+const load = (f) => (cfg[f] === undefined || cfg[f] === "" ? null : cfg[f]);
 async function writeCfg() {
   const f = await (await fs.getDataFolder()).createFile("settings.json", { overwrite: true });
   await f.write(JSON.stringify(cfg, null, 2));
@@ -132,8 +134,10 @@ const showSettings = (on) => {
   $("mainView").className = on ? "hidden" : "";
   $("settingsView").className = on ? "" : "hidden";
   $("saveMsg").textContent = "";
+  render(); // model row follows the Settings pick
 };
 $("gear").addEventListener("click", () => showSettings(true));
+$("modelLine").addEventListener("click", () => showSettings(true));
 $("back").addEventListener("click", () => { fillFields(SETTINGS); showSettings(false); });
 $("saveSettings").addEventListener("click", async () => {
   for (const f of SETTINGS) cfg[f] = val(f);
@@ -148,10 +152,14 @@ $("saveSettings").addEventListener("click", async () => {
 });
 $("browseComfy").addEventListener("click", async () => {
   const folder = await fs.getFolder();
-  if (folder) setVal("comfyDir", folder.nativePath);
+  if (!folder) return;
+  setVal("comfyDir", folder.nativePath);
+  testConnection();
 });
-$("reload").addEventListener("click", () => loadModels().then(() => { $("saveMsg").textContent = "Connected."; })
-  .catch((e) => { $("saveMsg").textContent = e.message || String(e); }));
+const testConnection = () => loadModels()
+  .then((live) => { $("saveMsg").textContent = live ? "Connected." : "ComfyUI is off. Models listed from its folder."; })
+  .catch((e) => { $("saveMsg").textContent = e.message || String(e); });
+$("reload").addEventListener("click", testConnection);
 for (const f of ["model", "clip", "vae"]) $(f).addEventListener("change", () => showAutoPicks());
 start();
 // leftovers from a crash mid-place
@@ -174,12 +182,15 @@ const clampRect = (b, doc) => ({
 });
 
 // model list = every Klein / Kontext / Fill file ComfyUI can load (GGUF, safetensors, Nunchaku);
-// text encoder and VAE default to "Auto" = picked per model family by models.js
+// text encoder and VAE default to "Auto" = picked per model family by models.js.
+// ComfyUI offline -> the same lists read from the ComfyUI folder on disk. Returns true when ComfyUI is live.
 async function loadModels() {
-  try { objectInfo = await json(fetch(baseUrl() + "/object_info")); } catch (e) {
+  try { listInfo = objectInfo = await json(fetch(baseUrl() + "/object_info")); } catch (e) {
     conn(false, "ComfyUI offline");
-    throw new Error("ComfyUI not reachable. Start it, or check the URL in Settings.");
+    listInfo = await scanModels(val("comfyDir").trim().replace(/[\\/]+$/, "")).catch(() => null);
+    if (!listInfo) throw new Error("ComfyUI not reachable. Start it, or set the ComfyUI folder in Settings to list its models.");
   }
+  const live = listInfo === objectInfo;
   const fill = (id, items, auto) => {
     const prev = val(id); // keep an unsaved pick when testing the connection
     if (auto) items = [{ value: models.AUTO, label: "Auto" }].concat(items);
@@ -188,20 +199,47 @@ async function loadModels() {
     setVal(id, items.some((it) => it.value === want) ? want : items[0] && items[0].value);
   };
   const tag = { flux2: "Klein", kontext: "Kontext", fill: "Fill" };
-  const list = models.listModels(objectInfo);
-  if (!list.length) throw new Error("No Flux.2 Klein, Kontext or Fill model found in ComfyUI.");
+  const list = models.listModels(listInfo);
+  if (!list.length) throw new Error(`No Flux.2 Klein, Kontext or Fill model found in ${live ? "ComfyUI" : "the ComfyUI models folder"}.`);
   fill("model", list.map((m) => ({ value: m.name, label: `${m.name}  (${tag[m.family]}${m.nunchaku ? ", Nunchaku" : ""})` })));
-  fill("clip", models.encoderList(objectInfo).map((n) => ({ value: n, label: n })), true);
-  fill("vae", models.vaeList(objectInfo).map((n) => ({ value: n, label: n })), true);
+  fill("clip", models.encoderList(listInfo).map((n) => ({ value: n, label: n })), true);
+  fill("vae", models.vaeList(listInfo).map((n) => ({ value: n, label: n })), true);
   showAutoPicks();
-  conn(true, val("model").replace(/\.(gguf|safetensors)$/, ""));
-  status("Make a selection, then click " + ($("mode").value === "edit" ? "Edit." : "Clean."));
+  render(); // main view shows the picked model
+  if (live) conn(true, val("model").replace(/\.(gguf|safetensors)$/, ""));
+  status(live ? "Make a selection, then click " + ($("mode").value === "edit" ? "Edit." : "Clean.")
+    : "ComfyUI is off: models listed from its folder. It starts on the first Clean.");
+  return live;
+}
+
+// ComfyUI's own folders for each list (folder_paths.py); sub folders show as "sub\name" like ComfyUI on Windows.
+// ponytail: extra_model_paths.yaml folders aren't read; they show up once ComfyUI is running
+async function scanModels(dir) {
+  if (!dir) return null;
+  const root = (await comfyCommand(dir)).main.replace(/[\\/]main\.py$/i, "");
+  const entries = async (path) => {
+    try { return await (await fs.getEntryWithUrl("file:/" + path.replace(/\\/g, "/"))).getEntries(); } catch (e) { return []; }
+  };
+  const walk = async (path, rel, out) => {
+    for (const e of await entries(path)) {
+      if (e.isFolder) await walk(`${path}\\${e.name}`, `${rel}${e.name}\\`, out);
+      else if (/\.(safetensors|sft|gguf|ckpt|pt|pth|bin)$/i.test(e.name)) out.push(rel + e.name);
+    }
+    return out;
+  };
+  const files = async (...subs) => {
+    const out = [];
+    for (const s of subs) await walk(`${root}\\models\\${s}`, "", out);
+    return [...new Set(out)].sort();
+  };
+  const nodes = (await entries(`${root}\\custom_nodes`)).filter((e) => e.isFolder).map((e) => e.name);
+  return models.diskInfo({ unet: await files("diffusion_models", "unet"), enc: await files("text_encoders", "clip"), vae: await files("vae") }, nodes);
 }
 
 function showAutoPicks() {
-  if (!objectInfo) return;
+  if (!listInfo) return;
   try {
-    const r = models.resolve(objectInfo, { model: val("model"), clip: val("clip"), vae: val("vae") });
+    const r = models.resolve(listInfo, { model: val("model"), clip: val("clip"), vae: val("vae") });
     $("autoHint").textContent = `Uses: ${r.enc.main}${r.enc.clipL ? " + " + r.enc.clipL : ""} \u00b7 ${r.vae}`;
     $("autoHint").className = "hint";
   } catch (e) {
@@ -599,9 +637,12 @@ function render() {
     ? "Regenerates the whole selection from the prompt."
     : "Selection is the mask. A full-width strip around it is sent as context.";
   $("go").textContent = edit ? "Edit selection" : "Clean selection";
+  // the model the next job will use: the Settings pick, or the saved one while ComfyUI is offline/starting
+  const model = val("model") || load("model");
+  $("modelName").textContent = model ? model.replace(/\.(gguf|safetensors)$/, "") : "Not chosen yet, click to pick";
   syncPresetPick();
   $("previewBar").className = "preview-bar" + (preview ? "" : " hidden");
-  $("count").textContent = jobs.length;
+  $("count").textContent = String(jobs.length); // UXP shows nothing for the number 0
   $("sessionStats").textContent = jobs.length
     ? `${jobs.filter((j) => j.outcome === "applied").length} applied \u00b7 ${jobs.filter((j) => !finished(j)).length} running`
     : "";

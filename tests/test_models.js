@@ -136,4 +136,19 @@ if (fs.existsSync(live)) {
   }
   console.log("live schema check: " + cases.length + " graphs ok");
 }
+
+// disk scan (ComfyUI off): a real portable install's files -> same lists and auto picks as the live loaders
+{
+  const files = {
+    unet: ["Flux2-Klein-9B-True-V3-Q4_K.gguf", "flux-2-klein-4b-Q5_K_M.gguf", "flux-2-klein-9b-Q4_K_S.gguf", "qwen-image-2.1-Q4_K_M.gguf"],
+    enc: ["Qwen3-4B-Q5_K_M.gguf", "Qwen3-8B-Q4_K_M.gguf", "clip_g.safetensors", "clip_l.safetensors", "qwen3vl_8b_w4a8_heretic.safetensors", "t5-v1_1-xxl-encoder-Q5_K_S.gguf"],
+    vae: ["Qwen_Image-VAE.safetensors", "ae.safetensors", "flux2-vae.safetensors"],
+  };
+  const info = M.diskInfo(files, ["ComfyUI-GGUF", "comfyui-manager"]);
+  assert.deepStrictEqual(M.listModels(info).map((m) => m.name), files.unet.slice(0, 3));
+  const r = M.resolve(info, { model: "flux-2-klein-9b-Q4_K_S.gguf", clip: M.AUTO, vae: M.AUTO });
+  assert.strictEqual(r.enc.main, "Qwen3-8B-Q4_K_M.gguf");
+  assert.strictEqual(r.vae, "flux2-vae.safetensors");
+  assert.strictEqual(M.listModels(M.diskInfo(files, [])).length, 0, "GGUF files need ComfyUI-GGUF");
+}
 console.log("ok");

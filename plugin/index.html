@@ -32,7 +32,10 @@
   }
 
   html, body { height: 100%; margin: 0; padding: 0; }
-  body { color: var(--text); font-size: 12px; }
+  /* UXP keeps the last cursor (text I-beam, resize grabber) unless every area sets its own */
+  body { color: var(--text); font-size: 12px; cursor: default; }
+  textarea, sp-textfield { cursor: text; }
+  .icon, .seg div, .icon-btn, .model-line, .btn, .filters div, .link, .job.ready, .x { cursor: pointer; }
   #app { height: 100%; display: flex; flex-direction: column; }
   #content { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
   .row { display: flex; align-items: center; }
@@ -86,7 +89,12 @@
   sp-textfield, sp-picker { width: 100%; }
   sp-button { width: 100%; }
 
-  .go { margin-top: 12px; }
+  .go { margin-top: 10px; }
+  .model-line { display: flex; align-items: center; height: 28px; margin-top: 10px; padding: 0 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
+  .model-line:hover { border-color: var(--muted); }
+  .model-line .k { flex: none; height: 28px; line-height: 28px; margin-right: 8px; font-size: 9px; font-weight: bold; letter-spacing: 1px; color: var(--faint); }
+  .model-line .v { flex: 1; height: 28px; line-height: 28px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .model-line .c { flex: none; height: 28px; line-height: 28px; margin-left: 8px; font-size: 10px; color: var(--accent); }
   .btn { height: 32px; line-height: 32px; border-radius: 9px; text-align: center; font-weight: bold; letter-spacing: 0.3px; }
   .btn.primary { color: #fff; background: var(--accent); background-image: linear-gradient(135deg, var(--accent), var(--accent-2)); }
   .btn.primary:hover { background-image: linear-gradient(135deg, #5d9bf7, #9a80f3); }
@@ -155,7 +163,9 @@
   .about .meta { margin-top: 2px; font-size: 10px; color: var(--muted); }
 
   footer { flex: none; height: 30px; line-height: 30px; border-top: 1px solid var(--line); text-align: center; font-size: 10px; color: var(--faint); }
-  footer b, .credit { margin-left: 4px; color: var(--text); font-weight: bold; letter-spacing: 0.3px; }
+  /* no letter-spacing: UXP sizes inline text without it, so the last letters wrap out of sight */
+  footer { white-space: nowrap; }
+  footer b, .credit { margin-left: 4px; color: var(--text); font-weight: bold; }
 </style>
 </head>
 <body>
@@ -197,6 +207,9 @@
       <textarea id="prompt" placeholder="Describe what to do with the selection"></textarea>
     </div>
 
+    <div class="model-line" id="modelLine" title="Model used for the next job. Click to change it in Settings.">
+      <span class="k">MODEL</span><span class="v" id="modelName"></span><span class="c">Change</span>
+    </div>
     <div class="go"><div class="btn primary big" id="go">Clean selection</div></div>
     <div class="status" id="status"></div>
 

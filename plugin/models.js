@@ -73,6 +73,17 @@ function resolve(info, sel) {
   return { model, enc, vae };
 }
 
+// /object_info look-alike built from the ComfyUI folder on disk, so the pickers can list models while
+// ComfyUI is off. files: { unet, enc, vae } file names (models/diffusion_models+unet, text_encoders+clip, vae),
+// nodes: custom_nodes folder names (GGUF / Nunchaku loaders exist only when installed). Only for listing, never for graphs.
+function diskInfo(files, nodes) {
+  const combo = (k, v) => ({ input: { required: { [k]: [v] } } });
+  const info = { UNETLoader: combo("unet_name", files.unet), CLIPLoader: combo("clip_name", files.enc), VAELoader: combo("vae_name", files.vae) };
+  if (nodes.some((n) => /gguf/i.test(n))) Object.assign(info, { UnetLoaderGGUF: combo("unet_name", files.unet), CLIPLoaderGGUF: combo("clip_name", files.enc) });
+  if (nodes.some((n) => /nunchaku/i.test(n))) info.NunchakuFluxDiTLoader = combo("model_path", files.unet);
+  return info;
+}
+
 // fill in required widget inputs the template doesn't set (e.g. Nunchaku loader options) from ComfyUI's defaults
 function withDefaults(info, node) {
   const req = (info[node.class_type] || { input: { required: {} } }).input.required;
@@ -125,4 +136,4 @@ function applyColorMatch(info, g, strength) {
   } else g["23"].inputs.strength = strength;
 }
 
-module.exports = { AUTO, TEMPLATES, family, listModels, encoderList, vaeList, pickEncoders, pickVae, resolve, buildGraph };
+module.exports = { AUTO, TEMPLATES, family, listModels, encoderList, vaeList, pickEncoders, pickVae, resolve, buildGraph, diskInfo };
