@@ -10,9 +10,17 @@
   .row > div { flex: 1; }
   button { width: 100%; margin-top: 12px; height: 32px; }
   #status { margin-top: 8px; white-space: pre-wrap; }
+  .job { display: flex; gap: 6px; align-items: center; padding: 4px; margin-top: 4px; border: 1px solid #555; border-radius: 3px; }
+  .job.ready { cursor: pointer; }
+  .job.active { border-color: #2d8ceb; background: rgba(45, 140, 235, 0.15); }
+  .job img { width: 56px; height: 40px; object-fit: cover; }
+  .job .txt { flex: 1; overflow: hidden; }
+  .job .sub { opacity: 0.7; }
+  .job button { width: 24px; height: 24px; margin: 0; }
 </style>
 </head>
 <body>
+<div id="app">
   <label>Mode</label>
   <select id="mode">
     <option value="clean">Clean (selection = mask)</option>
@@ -34,6 +42,9 @@
   <label>Context above &amp; below selection (px, Clean only)</label>
   <input id="pad" type="number" value="96">
 
+  <label>Auto-retry if a step takes longer than (s, 0 = off)</label>
+  <input id="stuck" type="number" value="30">
+
   <label>Model</label>
   <select id="model"></select>
   <label>Text encoder</label>
@@ -48,6 +59,12 @@
   <button id="go">Clean selection</button>
   <div id="status">Make a selection, then click Clean.</div>
 
-  <script src="index.js"></script>
+  <div id="previewBar" class="row" style="display:none">
+    <div><button id="apply">Apply</button></div>
+    <div><button id="discard">Discard</button></div>
+  </div>
+  <div id="jobs"></div>
+</div>
+<script src="index.js"></script>
 </body>
 </html>

@@ -34,11 +34,12 @@ def upload(img, name):
     p = TMP / name
     img.convert("RGB").save(p, quality=95)
     b = uuid.uuid4().hex
-    body = (f"--{b}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n"
+    body = (f"--{b}\r\nContent-Disposition: form-data; name=\"type\"\r\n\r\ntemp\r\n"
+            f"--{b}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n"
             f"--{b}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{name}\"\r\n"
             "Content-Type: image/jpeg\r\n\r\n").encode() + p.read_bytes() + f"\r\n--{b}--\r\n".encode()
     req = urllib.request.Request(URL + "/upload/image", body, {"Content-Type": f"multipart/form-data; boundary={b}"})
-    return json.load(urllib.request.urlopen(req))["name"]
+    return json.load(urllib.request.urlopen(req))["name"] + " [temp]"  # same as the plugin: ComfyUI temp/, not input/
 
 
 def to_edit_graph(wf):

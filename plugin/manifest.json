@@ -4,20 +4,46 @@
   "name": "Comfy Clean",
   "version": "1.0.0",
   "main": "index.html",
-  "host": { "app": "PS", "minVersion": "25.0.0" },
+  "host": {
+    "app": "PS",
+    "minVersion": "25.0.0"
+  },
   "entrypoints": [
     {
       "type": "panel",
       "id": "main",
-      "label": { "default": "Comfy Clean" },
-      "minimumSize": { "width": 230, "height": 300 },
-      "maximumSize": { "width": 2000, "height": 2000 },
-      "preferredDockedSize": { "width": 260, "height": 420 },
-      "preferredFloatingSize": { "width": 260, "height": 420 }
+      "label": {
+        "default": "Comfy Clean"
+      },
+      "minimumSize": {
+        "width": 230,
+        "height": 300
+      },
+      "maximumSize": {
+        "width": 2000,
+        "height": 2000
+      },
+      "preferredDockedSize": {
+        "width": 260,
+        "height": 420
+      },
+      "preferredFloatingSize": {
+        "width": 260,
+        "height": 420
+      }
+    },
+    {
+      "type": "command",
+      "id": "clean",
+      "label": {
+        "default": "Comfy Clean: Clean selection"
+      }
     }
   ],
   "requiredPermissions": {
-    "network": { "domains": "all" },
+    "network": {
+      "domains": "all"
+    },
     "localFileSystem": "plugin"
   }
 }

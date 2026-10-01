@@ -1,10 +1,25 @@
 const { app, core, imaging, action, constants } = require("photoshop");
-const { localFileSystem: fs, formats } = require("uxp").storage;
+const uxp = require("uxp");
+const { localFileSystem: fs, formats } = uxp.storage;
 
 const $ = (id) => document.getElementById(id);
-const FIELDS = ["mode", "prompt", "pad", "url", "model", "clip"];
-let running = 0;
+const FIELDS = ["mode", "prompt", "pad", "stuck", "url", "model", "clip"];
+const CLIENT = "ps_clean_" + Date.now();
+const SRGB = "sRGB IEC61966-2.1";
+const jobs = []; // newest first. Results live only in memory: gone when Photoshop closes.
+let preview = null; // { job, docId, layerId } -- the result currently shown in its document
 let jobSeq = 0;
+let ws = null;
+
+// "Clean selection" is also a Plugins-menu command, so it can get a keyboard shortcut
+uxp.entrypoints.setup({
+  commands: { clean: () => clean().catch(fail) },
+  panels: {
+    main: {
+      show(node) { if (node && node !== document.body && !node.contains($("app"))) node.appendChild($("app")); },
+    },
+  },
+});
 
 const load = (f) => { try { return localStorage.getItem("cc_" + f); } catch (e) { return null; } };
 const save = (f) => { try { localStorage.setItem("cc_" + f, $(f).value); } catch (e) {} };
@@ -17,8 +32,11 @@ for (const f of FIELDS) {
 }
 if (!$("prompt").value) $("prompt").value = $("preset").value;
 $("preset").addEventListener("change", () => { $("prompt").value = $("preset").value; save("prompt"); });
-$("go").addEventListener("click", () => clean().catch((e) => status("Error: " + (e.message || e))));
-$("reload").addEventListener("click", () => loadModels().catch((e) => status("Error: " + (e.message || e))));
+$("go").addEventListener("click", () => clean().catch(fail));
+$("reload").addEventListener("click", () => loadModels().catch(fail));
+$("apply").addEventListener("click", () => applyPreview().catch(fail));
+$("discard").addEventListener("click", () => discardPreview(true).catch(fail));
+$("mode").addEventListener("change", () => render());
 // 4B model wants Qwen3-4B, 9B wants Qwen3-8B
 $("model").addEventListener("change", () => {
   const want = /4b/i.test($("model").value) ? /qwen3.?4b/i : /9b/i.test($("model").value) ? /qwen3.?8b/i : null;
@@ -26,11 +44,27 @@ $("model").addEventListener("change", () => {
   if (opt) { $("clip").value = opt.value; save("clip"); }
 });
 loadModels().catch(() => status("ComfyUI not reachable. Start it, then Reload models."));
+// leftovers from a crash mid-place
+fs.getTemporaryFolder().then(async (t) => {
+  for (const e of await t.getEntries()) if (e.name.startsWith("ps_clean_")) await e.delete();
+}).catch(() => {});
+
+function status(msg) { $("status").textContent = msg; }
+function fail(e) { status("Error: " + (e.message || e)); }
+const baseUrl = () => $("url").value.replace(/\/+$/, "");
+const modal = (fn, name = "Comfy Clean") => core.executeAsModal(fn, { commandName: name });
+const play = (cmds) => action.batchPlay(cmds, {});
+const deselect = () => play([{ _obj: "set", _target: [{ _ref: "channel", _property: "selection" }], to: { _enum: "ordinal", _value: "none" } }]);
+const layerRef = (p) => [{ _ref: "layer", _id: p.layerId }, { _ref: "document", _id: p.docId }];
+const findDoc = (id) => app.documents.find((d) => d.id === id);
+const clampRect = (b, doc) => ({
+  left: Math.max(0, Math.floor(b.left)), top: Math.max(0, Math.floor(b.top)),
+  right: Math.min(doc.width, Math.ceil(b.right)), bottom: Math.min(doc.height, Math.ceil(b.bottom)),
+});
 
 // options carry the loader node class so .safetensors and .gguf both work
 async function loadModels() {
-  const base = $("url").value.replace(/\/+$/, "");
-  const info = await json(fetch(base + "/object_info"));
+  const info = await json(fetch(baseUrl() + "/object_info"));
   const fill = (sel, loaders, fallback) => {
     sel.innerHTML = "";
     for (const cls of loaders) {
@@ -50,15 +84,7 @@ async function loadModels() {
   status("Models loaded. Make a selection, then click Clean.");
 }
 
-function status(msg) { $("status").textContent = (running ? `[${running} running] ` : "") + msg; }
-
-const modal = (fn) => core.executeAsModal(fn, { commandName: "Comfy Clean" });
-const play = (cmds) => action.batchPlay(cmds, {});
-const selectionRef = [{ _ref: "channel", _property: "selection" }];
-const saveSel = (name) => play([{ _obj: "duplicate", _target: selectionRef, name }]);
-const loadSel = (name) => play([{ _obj: "set", _target: selectionRef, to: { _ref: "channel", _name: name } }]);
-const dropChannel = (name) => play([{ _obj: "delete", _target: [{ _ref: "channel", _name: name }] }]);
-const deselect = () => play([{ _obj: "set", _target: selectionRef, to: { _enum: "ordinal", _value: "none" } }]);
+// ---------- jobs ----------
 
 async function clean() {
   const doc = app.activeDocument;
@@ -66,111 +92,73 @@ async function clean() {
   const sel = doc.selection.bounds;
   if (!sel) throw new Error("Make a selection first.");
 
-  const base = $("url").value.replace(/\/+$/, "");
-  const prompt = $("prompt").value.trim();
-  const pad = +$("pad").value || 0;
   const edit = $("mode").value === "edit";
-  const id = `ps_clean_${Date.now()}_${++jobSeq}`;
-
+  const pad = +$("pad").value || 0;
   // Only this crop goes to ComfyUI, so page height doesn't matter.
   // clean: full page width, selection's height band + context above/below. edit: just the selection box.
-  const rect = edit ? {
-    left: Math.max(0, Math.floor(sel.left)),
-    top: Math.max(0, Math.floor(sel.top)),
-    right: Math.min(doc.width, Math.ceil(sel.right)),
-    bottom: Math.min(doc.height, Math.ceil(sel.bottom)),
-  } : {
-    left: 0,
-    top: Math.max(0, Math.floor(sel.top - pad)),
-    right: doc.width,
-    bottom: Math.min(doc.height, Math.ceil(sel.bottom + pad)),
+  const rect = edit ? clampRect(sel, doc)
+    : clampRect({ left: 0, right: doc.width, top: sel.top - pad, bottom: sel.bottom + pad }, doc);
+  const job = {
+    id: `ps_clean_${Date.now()}_${++jobSeq}`, docId: doc.id, docName: doc.title, base: baseUrl(),
+    prompt: $("prompt").value.trim(), edit, rect, w: rect.right - rect.left, h: rect.bottom - rect.top, state: "reading",
   };
-  const w = rect.right - rect.left, h = rect.bottom - rect.top;
+  jobs.unshift(job);
+  render();
 
-  running++;
   try {
-    status("Reading pixels...");
-    let jpeg, maskJpeg;
-    await modal(async () => {
-      await saveSel(id); // keep the exact selection shape for the layer mask later
-      // workflow rescales to ~1MP anyway; cap upload size for huge selections
-      const targetSize = Math.max(w, h) > 2048 ? (w > h ? { width: 2048 } : { height: 2048 }) : undefined;
-      const pix = await imaging.getPixels({
-        documentID: doc.id, sourceBounds: rect, targetSize,
-        componentSize: 8, applyAlpha: true, colorSpace: "RGB", colorProfile: "sRGB IEC61966-2.1",
-      });
-      jpeg = b64decode(await imaging.encodeImageData({ imageData: pix.imageData, base64: true }));
-      pix.imageData.dispose();
-      if (edit) return;
-
-      // selection -> grayscale -> RGB jpeg, so Flux only repaints the selected part
-      const selImg = await imaging.getSelection({ documentID: doc.id, sourceBounds: rect, targetSize });
-      const g = await selImg.imageData.getData({ chunky: true });
-      const rgb = new Uint8Array(g.length * 3);
-      for (let i = 0; i < g.length; i++) rgb[i * 3] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = g[i];
-      const maskData = await imaging.createImageDataFromBuffer(rgb, {
-        width: selImg.imageData.width, height: selImg.imageData.height, components: 3,
-        colorSpace: "RGB", colorProfile: "sRGB IEC61966-2.1",
-      });
-      maskJpeg = b64decode(await imaging.encodeImageData({ imageData: maskData, base64: true }));
-      selImg.imageData.dispose();
-      maskData.dispose();
+    let jpeg;
+    await modal(async (ctx) => {
+      // everything here is rolled back at the end: no history entry, preview layer comes back
+      const sid = await ctx.hostControl.suspendHistory({ documentID: doc.id, name: "Comfy Clean read" });
+      try {
+        if (preview && preview.docId === doc.id) await play([{ _obj: "hide", null: layerRef(preview) }]); // don't feed a preview back in
+        // workflow rescales to ~1MP anyway; cap upload size for huge selections
+        const { w, h } = job;
+        const targetSize = Math.max(w, h) > 2048 ? (w > h ? { width: 2048 } : { height: 2048 }) : undefined;
+        const pix = await imaging.getPixels({
+          documentID: doc.id, sourceBounds: rect, targetSize, componentSize: 8, applyAlpha: true, colorSpace: "RGB", colorProfile: SRGB,
+        });
+        jpeg = b64decode(await imaging.encodeImageData({ imageData: pix.imageData, base64: true }));
+        pix.imageData.dispose();
+        // exact selection at full res: layer mask in Photoshop, and the repaint mask for Flux
+        const s = await imaging.getSelection({ documentID: doc.id, sourceBounds: rect });
+        job.sel = await s.imageData.getData({ chunky: true });
+        s.imageData.dispose();
+      } finally {
+        await ctx.hostControl.resumeHistory(sid, false);
+      }
     });
 
-    status("Uploading...");
+    job.state = "uploading"; render();
     // node ids match plugin/workflow.json: 1 = model, 2 = text encoder, 4 = image, 20 = mask, 7 = prompt, 15 = seed
-    const wfFile = await (await fs.getPluginFolder()).getEntry("workflow.json");
-    const wf = JSON.parse(await wfFile.read());
-    wf["4"].inputs.image = await upload(base, id + ".jpg", jpeg);
-    if (edit) toEditGraph(wf);
-    else wf["20"].inputs.image = await upload(base, id + "_mask.jpg", maskJpeg);
-    wf["7"].inputs.text = prompt;
+    const wf = JSON.parse(await (await (await fs.getPluginFolder()).getEntry("workflow.json")).read());
+    wf["4"].inputs.image = await upload(job.base, job.id + ".jpg", jpeg);
+    wf["7"].inputs.text = job.prompt;
     wf["15"].inputs.noise_seed = Math.floor(Math.random() * 2 ** 31);
     const model = $("model").selectedOptions[0], clip = $("clip").selectedOptions[0];
     if (model) wf["1"] = model.dataset.cls === "UNETLoader"
       ? { class_type: "UNETLoader", inputs: { unet_name: model.value, weight_dtype: "default" } }
       : { class_type: "UnetLoaderGGUF", inputs: { unet_name: model.value } };
     if (clip) wf["2"] = { class_type: clip.dataset.cls, inputs: { clip_name: clip.value, type: "flux2" } };
+    if (edit) toEditGraph(wf);
+    else wf["20"].inputs.image = await upload(job.base, job.id + "_mask.jpg", await maskJpeg(job));
+    if (job.cancelled) throw new Error("Cancelled");
 
-    status("Generating...");
-    const pid = (await json(fetch(base + "/prompt", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: wf }),
-    }))).prompt_id;
-    const img = await waitResult(base, pid);
-    const png = await (await fetch(`${base}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder)}&type=${img.type}`)).arrayBuffer();
-
-    // ponytail: temp file is the only way to place an image; deleted right after
-    const tmp = await (await fs.getTemporaryFolder()).createFile(id + ".png", { overwrite: true });
-    await tmp.write(png, { format: formats.binary });
-
-    status("Placing...");
-    await modal(async () => {
-      if (app.activeDocument.id !== doc.id) app.activeDocument = doc;
-      const userSel = doc.selection.bounds ? id + "_user" : null; // user may have selected the next bubble meanwhile
-      if (userSel) await saveSel(userSel);
-
-      await play([{ _obj: "placeEvent", null: { _path: await fs.createSessionToken(tmp), _kind: "local" } }]);
-      const layer = doc.activeLayers[0];
-      let b = layer.bounds;
-      await layer.scale(100 * w / (b.right - b.left), 100 * h / (b.bottom - b.top), constants.AnchorPosition.TOPLEFT);
-      b = layer.bounds;
-      await layer.translate(rect.left - b.left, rect.top - b.top);
-      await layer.rasterize(constants.RasterizeType.ENTIRELAYER);
-      layer.name = "Clean: " + prompt.slice(0, 40);
-
-      await loadSel(id); // exact selection, no expand/feather
-      await play([{ _obj: "make", new: { _class: "channel" }, at: { _ref: "channel", _enum: "channel", _value: "mask" }, using: { _enum: "userMaskEnabled", _value: "revealSelection" } }]);
-      await dropChannel(id);
-
-      if (userSel) { await loadSel(userSel); await dropChannel(userSel); } else await deselect();
-    });
-    await tmp.delete();
-    running--;
-    status("Done.");
+    connectWs(job.base);
+    job.wf = wf;
+    job.retries = 0;
+    await submit(job, false);
+    const img = await waitResult(job);
+    job.png = new Uint8Array(await (await fetch(`${job.base}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder)}&type=${img.type}`)).arrayBuffer());
+    job.thumb = "data:image/png;base64," + b64encode(job.png);
+    job.state = "ready";
+    status("Result ready. Click it to preview.");
   } catch (e) {
-    running--;
-    try { await modal(() => dropChannel(id)); } catch (_) {}
-    throw e;
+    if (job.cancelled) return removeJob(job);
+    job.state = "error";
+    job.error = e.message || String(e);
+  } finally {
+    render();
   }
 }
 
@@ -183,30 +171,224 @@ function toEditGraph(wf) {
   wf["19"].inputs.images = ["18", 0];
 }
 
+async function maskJpeg(job) {
+  const rgb = new Uint8Array(job.sel.length * 3);
+  for (let i = 0; i < job.sel.length; i++) rgb[i * 3] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = job.sel[i];
+  const data = await imaging.createImageDataFromBuffer(rgb, { width: job.w, height: job.h, components: 3, colorSpace: "RGB", colorProfile: SRGB });
+  const out = b64decode(await imaging.encodeImageData({ imageData: data, base64: true }));
+  data.dispose();
+  return out;
+}
+
+async function submit(job, front) {
+  job.state = "queued"; job.sampling = false; job.progress = null; render();
+  job.pid = (await json(fetch(job.base + "/prompt", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: job.wf, client_id: CLIENT, front }),
+  }))).prompt_id;
+}
+
+const post = (base, path, body) => fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+// Sometimes, with VRAM nearly full, Flux crawls at ~40s/step instead of ~5s. Cancel + resubmit fixes it,
+// so do that automatically: if no sampler step finishes within the limit, interrupt and requeue at the front.
+// 2nd retry also asks ComfyUI to unload models and free VRAM first.
+async function retryIfStuck(job) {
+  const limit = +$("stuck").value || 0;
+  if (!limit || !job.sampling || Date.now() - job.tick < limit * 1000 || job.retries >= 2) return;
+  job.retries++;
+  job.state = "retrying"; render();
+  await post(job.base, "/interrupt", { prompt_id: job.pid });
+  if (job.retries >= 2) await post(job.base, "/free", { unload_models: true, free_memory: true });
+  await submit(job, true);
+}
+
+async function waitResult(job) {
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 1000));
+    if (job.cancelled) throw new Error("Cancelled");
+    await retryIfStuck(job);
+    const h = (await json(fetch(`${job.base}/history/${job.pid}`)))[job.pid];
+    if (h) {
+      if (h.status && h.status.status_str === "error") {
+        const err = (h.status.messages || []).find((m) => m[0] === "execution_error");
+        throw new Error(err ? err[1].exception_message : "ComfyUI execution failed");
+      }
+      const out = Object.values(h.outputs || {}).find((o) => o.images && o.images.length);
+      if (out) return out.images[0];
+    } else if (job.state === "queued") {
+      const q = await json(fetch(job.base + "/queue"));
+      const pending = q.queue_pending.slice().sort((a, b) => a[0] - b[0]);
+      const pos = pending.findIndex((p) => p[1] === job.pid);
+      job.queuePos = pos + 1;
+      if (pos < 0 && q.queue_running.some((p) => p[1] === job.pid)) job.state = "running";
+      render();
+    }
+  }
+}
+
+// live step progress from ComfyUI; history polling stays the source of truth
+function connectWs(base) {
+  if (ws && ws.readyState <= 1) return;
+  try { ws = new WebSocket(base.replace(/^http/, "ws") + "/ws?clientId=" + CLIENT); } catch (e) { return; }
+  ws.onmessage = (e) => {
+    if (typeof e.data !== "string") return; // binary = sampler preview images
+    const m = JSON.parse(e.data), d = m.data || {};
+    const job = jobs.find((j) => j.pid && j.pid === d.prompt_id);
+    if (!job || job.state === "ready" || job.state === "error") return;
+    if (m.type === "executing" || m.type === "execution_start") job.state = "running";
+    // stuck-watchdog clock: starts when the sampler node starts, resets on every step
+    if (m.type === "executing") { job.sampling = d.node === "17"; job.tick = Date.now(); }
+    if (m.type === "progress") { job.state = "running"; job.progress = `${d.value}/${d.max}`; job.tick = Date.now(); }
+    render();
+  };
+}
+
+async function cancelJob(job) {
+  job.cancelled = true;
+  render();
+  if (!job.pid) return;
+  await post(job.base, "/queue", { delete: [job.pid] });
+  if (job.state === "running") await post(job.base, "/interrupt", { prompt_id: job.pid });
+}
+
+function removeJob(job) {
+  const i = jobs.indexOf(job);
+  if (i >= 0) jobs.splice(i, 1);
+  render();
+}
+
+// ---------- preview / apply ----------
+
+async function showPreview(job) {
+  if (preview && preview.job === job) return;
+  const doc = findDoc(job.docId);
+  if (!doc) throw new Error(`"${job.docName}" was closed.`);
+  await discardPreview(false);
+  status("Placing preview...");
+
+  const tmp = await (await fs.getTemporaryFolder()).createFile(job.id + ".png", { overwrite: true });
+  await tmp.write(job.png.buffer, { format: formats.binary });
+  try {
+    await modal(async (ctx) => {
+      if (app.activeDocument.id !== doc.id) app.activeDocument = doc; // always the document the selection came from
+      const sid = await ctx.hostControl.suspendHistory({ documentID: doc.id, name: "Comfy Clean" });
+      // keep whatever the user has selected now (maybe the next bubble)
+      let userSel = null;
+      if (doc.selection.bounds) {
+        const r = clampRect(doc.selection.bounds, doc);
+        const s = await imaging.getSelection({ documentID: doc.id, sourceBounds: r });
+        userSel = { r, data: s.imageData };
+      }
+
+      await play([{ _obj: "placeEvent", null: { _path: await fs.createSessionToken(tmp), _kind: "local" } }]);
+      const layer = doc.activeLayers[0];
+      let b = layer.bounds;
+      await layer.scale(100 * job.w / (b.right - b.left), 100 * job.h / (b.bottom - b.top), constants.AnchorPosition.TOPLEFT);
+      b = layer.bounds;
+      await layer.translate(job.rect.left - b.left, job.rect.top - b.top);
+      await layer.rasterize(constants.RasterizeType.ENTIRELAYER);
+      layer.name = "Clean preview";
+
+      // layer mask = the exact original selection, no expand/feather
+      const m = await imaging.createImageDataFromBuffer(job.sel, { width: job.w, height: job.h, components: 1, chunky: true, colorSpace: "Grayscale" });
+      await imaging.putSelection({ documentID: doc.id, imageData: m, replace: true, targetBounds: { left: job.rect.left, top: job.rect.top } });
+      m.dispose();
+      await play([{ _obj: "make", new: { _class: "channel" }, at: { _ref: "channel", _enum: "channel", _value: "mask" }, using: { _enum: "userMaskEnabled", _value: "revealSelection" } }]);
+
+      if (userSel) {
+        await imaging.putSelection({ documentID: doc.id, imageData: userSel.data, replace: true, targetBounds: { left: userSel.r.left, top: userSel.r.top } });
+        userSel.data.dispose();
+      } else await deselect();
+      preview = { job, docId: doc.id, layerId: layer.id };
+      await ctx.hostControl.resumeHistory(sid, true);
+    });
+  } finally {
+    await tmp.delete();
+  }
+  status("Preview shown. Apply to keep it, Discard to remove.");
+  render();
+}
+
+async function applyPreview() {
+  if (!preview) return;
+  const p = preview;
+  await modal(() => play([{ _obj: "set", _target: layerRef(p), to: { _obj: "layer", name: "Clean: " + p.job.prompt.slice(0, 40) } }]));
+  preview = null;
+  removeJob(p.job);
+  status("Applied.");
+}
+
+async function discardPreview(dropJob) {
+  if (!preview) return;
+  const p = preview;
+  preview = null;
+  if (findDoc(p.docId)) {
+    try { await modal(() => play([{ _obj: "delete", _target: layerRef(p) }])); } catch (e) {} // user may have deleted it already
+  }
+  if (dropJob) { removeJob(p.job); status("Discarded."); } else render();
+}
+
+// ---------- UI ----------
+
+function render() {
+  $("previewBar").style.display = preview ? "flex" : "none";
+  $("go").textContent = $("mode").value === "edit" ? "Edit selection" : "Clean selection";
+  const box = $("jobs");
+  box.innerHTML = "";
+  for (const job of jobs) {
+    const el = document.createElement("div");
+    el.className = "job" + (job.state === "ready" ? " ready" : "") + (preview && preview.job === job ? " active" : "");
+    if (job.thumb) { const img = document.createElement("img"); img.src = job.thumb; el.appendChild(img); }
+    const txt = document.createElement("div");
+    txt.className = "txt";
+    const title = document.createElement("div");
+    title.textContent = (job.edit ? "Edit: " : "") + job.prompt.slice(0, 50);
+    const sub = document.createElement("div");
+    sub.className = "sub";
+    sub.textContent = job.docName + " · " + stateText(job);
+    txt.appendChild(title); txt.appendChild(sub); el.appendChild(txt);
+
+    const x = document.createElement("button");
+    x.textContent = "✕";
+    x.title = job.state === "ready" || job.state === "error" ? "Remove" : "Cancel";
+    x.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (preview && preview.job === job) discardPreview(true).catch(fail);
+      else if (job.state === "ready" || job.state === "error") removeJob(job);
+      else cancelJob(job).catch(fail);
+    });
+    el.appendChild(x);
+    if (job.state === "ready") el.addEventListener("click", () => showPreview(job).catch(fail));
+    box.appendChild(el);
+  }
+}
+
+function stateText(job) {
+  if (job.cancelled) return "cancelling...";
+  if (job.state === "queued") return job.queuePos ? `queued #${job.queuePos}` : "queued";
+  if (job.state === "retrying") return `stuck, retrying (${job.retries}/2)...`;
+  if (job.state === "running") return job.progress ? `step ${job.progress}` : "running...";
+  if (job.state === "ready") return preview && preview.job === job ? "previewing" : "ready - click to preview";
+  if (job.state === "error") return "error: " + job.error;
+  return job.state + "..." + (job.retries ? ` (retry ${job.retries})` : "");
+}
+render();
+
+// ---------- ComfyUI I/O ----------
+
 async function json(p) {
   const r = await p;
   if (!r.ok) throw new Error(`ComfyUI ${r.status}: ${(await r.text()).slice(0, 300)}`);
   return r.json();
 }
 
-async function waitResult(base, pid) {
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 1000));
-    const h = (await json(fetch(`${base}/history/${pid}`)))[pid];
-    if (!h) continue;
-    if (h.status && h.status.status_str === "error") {
-      const err = (h.status.messages || []).find((m) => m[0] === "execution_error");
-      throw new Error(err ? err[1].exception_message : "ComfyUI execution failed");
-    }
-    const out = Object.values(h.outputs || {}).find((o) => o.images && o.images.length);
-    if (out) return out.images[0];
-  }
-}
-
+// uploads go to ComfyUI's temp folder (wiped on every ComfyUI start), not input/.
 // hand-built multipart: no FormData/Blob dependency in UXP
 async function upload(base, name, bytes) {
   const b = "----cc" + Date.now();
-  const head = ascii(`--${b}\r\nContent-Disposition: form-data; name="overwrite"\r\n\r\ntrue\r\n` +
+  const field = (k, v) => `--${b}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`;
+  const head = ascii(field("type", "temp") + field("overwrite", "true") +
     `--${b}\r\nContent-Disposition: form-data; name="image"; filename="${name}"\r\nContent-Type: image/jpeg\r\n\r\n`);
   const tail = ascii(`\r\n--${b}--\r\n`);
   const body = new Uint8Array(head.length + bytes.length + tail.length);
@@ -214,16 +396,17 @@ async function upload(base, name, bytes) {
   const r = await json(fetch(base + "/upload/image", {
     method: "POST", headers: { "Content-Type": "multipart/form-data; boundary=" + b }, body: body.buffer,
   }));
-  return r.subfolder ? `${r.subfolder}/${r.name}` : r.name;
+  return (r.subfolder ? `${r.subfolder}/${r.name}` : r.name) + " [temp]";
 }
 
 function ascii(s) { return Uint8Array.from(s, (c) => c.charCodeAt(0)); }
 
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
 function b64decode(s) {
   s = s.slice(s.indexOf(",") + 1).replace(/[^A-Za-z0-9+/]/g, "");
-  const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   const t = new Uint8Array(128);
-  for (let i = 0; i < 64; i++) t[A.charCodeAt(i)] = i;
+  for (let i = 0; i < 64; i++) t[B64.charCodeAt(i)] = i;
   const out = new Uint8Array((s.length * 3) >> 2);
   for (let i = 0, j = 0; i < s.length; i += 4) {
     const n = (t[s.charCodeAt(i)] << 18) | (t[s.charCodeAt(i + 1)] << 12) | (t[s.charCodeAt(i + 2)] << 6) | t[s.charCodeAt(i + 3)];
@@ -232,4 +415,14 @@ function b64decode(s) {
     if (j < out.length) out[j++] = n & 255;
   }
   return out;
+}
+
+function b64encode(u8) {
+  const parts = [];
+  for (let i = 0; i < u8.length; i += 3) {
+    const n = (u8[i] << 16) | ((u8[i + 1] || 0) << 8) | (u8[i + 2] || 0);
+    const k = u8.length - i;
+    parts.push(B64[n >> 18] + B64[(n >> 12) & 63] + (k > 1 ? B64[(n >> 6) & 63] : "=") + (k > 2 ? B64[n & 63] : "="));
+  }
+  return parts.join("");
 }
