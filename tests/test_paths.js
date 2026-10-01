@@ -48,16 +48,31 @@ async function run(withImaging) {
   };
   const ps = { app, core: { executeAsModal: (fn) => fn(anything()) }, action: { batchPlay, addNotificationListener: (evs, fn) => { onEvent = fn; } }, constants: anything(),
     imaging: withImaging ? withOverrides(anything(), { encodeImageData: async () => "AAAA", getSelection }) : undefined };
-  const uxp = { storage: { localFileSystem: anything(), formats: anything() }, entrypoints: anything(), shell: anything() };
+  // plugin folder = the real one, so the real workflow templates are read
+  const realFolder = (dir) => ({ getEntry: async (name) => {
+    const p = path.join(dir, name);
+    return require("fs").statSync(p).isDirectory() ? realFolder(p) : { read: async () => require("fs").readFileSync(p, "utf8") };
+  } });
+  const lfs = withOverrides(anything(), { getPluginFolder: async () => realFolder(path.dirname(PLUGIN)) });
+  const uxp = { storage: { localFileSystem: lfs, formats: anything() }, entrypoints: anything(), shell: anything() };
   const load = Module._load;
   Module._load = function (req, ...a) { return { photoshop: ps, uxp }[req] || load.call(this, req, ...a); };
   const m = new Module(PLUGIN);
   m.filename = PLUGIN;
   m.paths = Module._nodeModulePaths(path.dirname(PLUGIN));
-  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;module.exports = { clean, autoPreview, applyPreview, discardPreview, scrollToArea, jobs, legacy, shown: () => preview };", PLUGIN);
+  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;module.exports = { clean, autoPreview, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, shown: () => preview, needs: () => needs };", PLUGIN);
   Module._load = load;
   const P = m.exports;
   assert.strictEqual(P.legacy(), !withImaging, "legacy() picks the path from the Imaging API");
+
+  // an old ComfyUI without custom nodes: a Klein model loads, the user is told what to install
+  const oldComfy = { UNETLoader: { input: { required: { unet_name: [["flux-2-klein-9b.safetensors"]] } } },
+    CLIPLoader: { input: { required: { clip_name: [["qwen_3_8b.safetensors"]] } } }, VAELoader: { input: { required: { vae_name: [["flux2-vae.safetensors"]] } } } };
+  global.fetch = async () => ({ ok: true, json: async () => oldComfy });
+  assert.strictEqual(await P.loadModels(), true, "connected");
+  assert.deepStrictEqual(P.needs().map((m) => m.name), ["Update ComfyUI", "comfyui-inpaint-nodes"]);
+  assert.ok(/Install in ComfyUI: Update ComfyUI/.test(els.status.textContent), "main view says what to install: " + els.status.textContent);
+  global.fetch = () => Promise.reject(new Error("offline"));
 
   await P.clean().catch((e) => { throw new Error("clean threw: " + e.stack); });
   const job = P.jobs[0];

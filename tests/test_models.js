@@ -25,6 +25,7 @@ const fake = {
   }, optional: { i2f_mode: [["enabled", "always"], { default: "enabled" }] } } },
   CLIPLoaderGGUF: { input: { required: { clip_name: combo(["Qwen3-4B-Q5_K_M.gguf", "Qwen3-8B-Q4_K_M.gguf", "qwen3vl_8b_x.safetensors", "clip_l.safetensors", "t5xxl_fp8_e4m3fn.safetensors", "t5-v1_1-xxl-encoder-Q5_K_S.gguf"]) } } },
   VAELoader: { input: { required: { vae_name: combo(["Qwen_Image-VAE.safetensors", "ae.safetensors", "flux2-vae.safetensors", "taef1"]) } } },
+  INPAINT_ColorMatch: { input: { required: {} } }, // comfyui-inpaint-nodes (required by Clean)
 };
 
 function checkLinks(g, label) {
@@ -82,17 +83,16 @@ assert.ok(!M.listModels(noNunchaku).some((m) => /svdq/.test(m.name)));
 g = build(fake, "flux-2-klein-9b-Q4_K_S.gguf", false, { clip: "Qwen3-4B-Q5_K_M.gguf", vae: "ae.safetensors" });
 assert.deepStrictEqual([g["2"].inputs.clip_name, g["3"].inputs.vae_name], ["Qwen3-4B-Q5_K_M.gguf", "ae.safetensors"]);
 
-// color match: masked node when available, ColorTransfer fallback, 0 = off
-const withCM = { ...fake, INPAINT_ColorMatch: { input: { required: {} } } };
-g = build(withCM, "flux-2-klein-9b-Q4_K_S.gguf", false, { colorMatch: 0.7 });
+// color match: comfyui-inpaint-nodes' masked match, required for Clean; 0 = off (runs without the pack)
+g = build(fake, "flux-2-klein-9b-Q4_K_S.gguf", false, { colorMatch: 0.7 });
 assert.deepStrictEqual(g["23"], { class_type: "INPAINT_ColorMatch", inputs: { target: ["18", 0], reference: ["5", 0], exclude_mask: ["20", 0], strength: 0.7 } });
-assert.ok(!g["22"]);
 checkLinks(g, "masked color match");
-g = build(fake, "flux-2-klein-9b-Q4_K_S.gguf", false, { colorMatch: 0.5 });
-assert.deepStrictEqual([g["23"].class_type, g["23"].inputs.strength], ["ColorTransfer", 0.5]);
-g = build(withCM, "flux-2-klein-9b-Q4_K_S.gguf", false, { colorMatch: 0 });
-assert.ok(!g["23"] && !g["22"]);
+const noCM = Object.fromEntries(Object.entries(fake).filter(([c]) => c !== "INPAINT_ColorMatch"));
+assert.throws(() => build(noCM, "flux-2-klein-9b-Q4_K_S.gguf", false, { colorMatch: 0.5 }), /comfyui-inpaint-nodes/);
+g = build(noCM, "flux-2-klein-9b-Q4_K_S.gguf", false, { colorMatch: 0 });
+assert.ok(!g["23"]);
 assert.deepStrictEqual(g["19"].inputs.images, ["18", 0]);
+assert.ok(build(noCM, "flux-2-klein-9b-Q4_K_S.gguf", true), "Edit has no color match, runs without the pack");
 
 // every family x mode builds and all links resolve
 for (const [model, modes] of [["flux-2-klein-9b-Q4_K_S.gguf", [false, true]], ["flux1-kontext-dev-fp8.safetensors", [false, true]], ["flux1-fill-dev-Q4_K.gguf", [false]]]) {
@@ -135,6 +135,52 @@ if (fs.existsSync(live)) {
     }
   }
   console.log("live schema check: " + cases.length + " graphs ok");
+}
+
+// custom nodes the user is told to install
+{
+  const names = (needs) => needs.map((m) => m.name);
+  const without = (info, ...cls) => Object.fromEntries(Object.entries(info).filter(([c]) => !cls.includes(c)));
+  assert.deepStrictEqual(names(M.missingNodes(fake, ["flux-2-klein-9b-Q4_K_S.gguf"], [])), [], "all there");
+  assert.deepStrictEqual(names(M.missingNodes(without(fake, "UnetLoaderGGUF", "CLIPLoaderGGUF"), ["flux-2-klein-9b-Q4_K_S.gguf"], [])),
+    ["ComfyUI-GGUF"], ".gguf on disk, no GGUF loader");
+  assert.ok(M.missingNodes(without(fake, "UnetLoaderGGUF", "CLIPLoaderGGUF"), ["x.gguf"], [])[0].required);
+  const bare = { VAELoader: fake.VAELoader, CLIPLoader: { input: { required: { clip_name: [[]] } } }, UNETLoader: { input: { required: { unet_name: [[]] } } } };
+  assert.deepStrictEqual(names(M.missingNodes(bare, [], [])), ["ComfyUI-GGUF", "comfyui-inpaint-nodes"], "no usable model at all: point at GGUF");
+  assert.deepStrictEqual(names(M.missingNodes(without(fake, "NunchakuFluxDiTLoader"), ["svdq-int4_r32-flux.1-kontext-dev.safetensors"], [])),
+    ["ComfyUI-nunchaku"], "svdq file, no Nunchaku loader");
+  const needs = M.missingNodes(fake, [], ["ReferenceLatent", "ReferenceLatent", "INPAINT_ColorMatch"]); // fake has no core nodes
+  assert.deepStrictEqual(names(needs), ["Update ComfyUI"]);
+  assert.ok(/missing ReferenceLatent\)$/.test(needs[0].why), "missing core nodes named once; INPAINT_* is the pack, not core");
+  const noPack = M.missingNodes(without(fake, "INPAINT_ColorMatch"), [], []);
+  assert.deepStrictEqual(names(noPack), ["comfyui-inpaint-nodes"], "inpaint nodes: required even while ComfyUI is off");
+  assert.ok(noPack[0].required);
+  assert.ok(M.diskInfo({ unet: [], enc: [], vae: [] }, ["comfyui-inpaint-nodes"]).INPAINT_ColorMatch, "disk scan sees the pack folder");
+  if (fs.existsSync(live)) { // the real ComfyUI here has everything the templates need
+    const info = JSON.parse(fs.readFileSync(live, "utf8"));
+    const core = Object.values(templates).flatMap((g) => Object.entries(g).filter(([id]) => !["1", "2", "3"].includes(id)).map(([, n]) => n.class_type));
+    assert.deepStrictEqual(names(M.missingNodes(info, ["flux-2-klein-9b-Q4_K_S.gguf"], core)), [], "live ComfyUI: nothing to install");
+  }
+}
+
+// text encoder / VAE downloads the selected model still needs
+{
+  const files = (info, sel) => M.missingFiles(info, { clip: M.AUTO, vae: M.AUTO, ...sel }).map((f) => f.name);
+  const withLists = (enc, vae) => ({ ...fake, CLIPLoaderGGUF: { input: { required: { clip_name: [enc] } } }, VAELoader: { input: { required: { vae_name: [vae] } } } });
+  assert.deepStrictEqual(files(fake, { model: "flux-2-klein-9b-Q4_K_S.gguf" }), [], "all there");
+  const only4b = withLists(["Qwen3-4B-Q5_K_M.gguf"], ["flux2-vae.safetensors"]);
+  assert.deepStrictEqual(files(only4b, { model: "flux-2-klein-9b-Q4_K_S.gguf" }), ["Qwen3-8B-Q4_K_M.gguf"], "9B never borrows the 4B encoder; GGUF installed: Q4_K_M");
+  // without ComfyUI-GGUF a .gguf encoder can't load: the safetensors one instead
+  const noGguf = { ...Object.fromEntries(Object.entries(only4b).filter(([c]) => !/GGUF/.test(c))), CLIPLoader: { input: { required: { clip_name: [["Qwen3-4B-Q5_K_M.gguf"]] } } } };
+  noGguf.UNETLoader = { input: { required: { unet_name: [["flux-2-klein-9b-fp8.safetensors"]] } } };
+  assert.deepStrictEqual(files(noGguf, { model: "flux-2-klein-9b-fp8.safetensors" }), ["qwen_3_8b_fp8mixed.safetensors"], "no GGUF: safetensors");
+  assert.throws(() => M.resolve(only4b, { model: "flux-2-klein-9b-Q4_K_S.gguf", clip: M.AUTO, vae: M.AUTO }), /Qwen3-8B.*Settings/);
+  assert.deepStrictEqual(files(only4b, { model: "flux-2-klein-4b-Q5_K_M.gguf" }), [], "4B has its encoder");
+  assert.deepStrictEqual(files(only4b, { model: "flux-2-klein-9b-Q4_K_S.gguf", clip: "Qwen3-4B-Q5_K_M.gguf" }), [], "picked by hand: trusted");
+  assert.deepStrictEqual(files(withLists(["Qwen3-8B-Q4_K_M.gguf"], ["ae.safetensors"]), { model: "flux-2-klein-9b-Q4_K_S.gguf" }), ["flux2-vae.safetensors"]);
+  assert.deepStrictEqual(files(withLists([], []), { model: "flux1-kontext-dev-fp8.safetensors" }),
+    ["t5-v1_1-xxl-encoder-Q4_K_M.gguf", "clip_l.safetensors", "ae.safetensors"], "Flux.1 needs T5 (Q4_K_M GGUF), clip_l, ae");
+  assert.ok(M.missingFiles(withLists([], []), { model: "flux1-fill-dev-Q4_K.gguf", clip: M.AUTO, vae: M.AUTO }).every((f) => /^https:\/\/huggingface\.co\//.test(f.url) && f.folder));
 }
 
 // disk scan (ComfyUI off): a real portable install's files -> same lists and auto picks as the live loaders

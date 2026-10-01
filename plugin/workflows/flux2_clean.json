@@ -18,7 +18,6 @@
   "15": {"class_type": "RandomNoise", "inputs": {"noise_seed": 0}},
   "17": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["15", 0], "guider": ["12", 0], "sampler": ["13", 0], "sigmas": ["14", 0], "latent_image": ["21", 0]}},
   "18": {"class_type": "VAEDecode", "inputs": {"samples": ["17", 0], "vae": ["3", 0]}},
-  "22": {"class_type": "ImageCompositeMasked", "inputs": {"destination": ["5", 0], "source": ["18", 0], "x": 0, "y": 0, "resize_source": false, "mask": ["20", 0]}},
-  "23": {"class_type": "ColorTransfer", "inputs": {"image_target": ["18", 0], "image_ref": ["22", 0], "method": "reinhard_lab", "source_stats": "per_frame", "strength": 1.0}},
+  "23": {"class_type": "INPAINT_ColorMatch", "inputs": {"target": ["18", 0], "reference": ["5", 0], "exclude_mask": ["20", 0], "strength": 1.0}},
   "19": {"class_type": "PreviewImage", "inputs": {"images": ["23", 0]}}
 }

@@ -18,6 +18,8 @@ let filter = "all"; // results filter: all | new | applied
 let preview = null; // { job, docId, layerId } -- the result currently shown in its document
 let placing = false; // a preview is being placed right now
 let scrolledFor = null; // the previewed result last scrolled into view in the list
+let needs = []; // custom nodes / ComfyUI update to install (checkNodes)
+let downloads = []; // text encoder / VAE files the selected model still needs (showAutoPicks)
 let jobSeq = 0;
 let ws = null;
 let objectInfo = null; // ComfyUI /object_info, cached by loadModels
@@ -27,6 +29,7 @@ let starting = null; // shared promise while the plugin is starting ComfyUI
 
 // first-run presets; after that the user's list lives in settings.json (cfg.presets)
 const DEFAULT_PRESETS = [
+  { name: "Text (auto)", prompt: "Remove all text and lettering. If the text is inside a speech bubble, keep the bubble exactly as it is: same shape, outline, tail and fill, and fill where the text was with the bubble's own clean fill. If the text is on the artwork, fill where it was with the background around it, continuing its lines, colors, texture and screentone. Do not change anything else; keep every other line, color and detail identical." },
   { name: "Text, keep bubble", prompt: "Remove all text and lettering. Keep the speech bubble exactly as it is: same shape, outline, tail and white fill. Fill where the text was with the same clean background as the rest of the bubble. Do not change anything else; keep every line, color and detail identical." },
   { name: "Text", prompt: "Remove all text and lettering. Fill where the text was with the background around it, matching its color, texture and lines. Do not change anything else." },
   { name: "Text + bubble", prompt: "Remove the speech bubble and all text in it. Restore the artwork behind it so it continues naturally from the surroundings. Do not change anything else." },
@@ -222,6 +225,8 @@ async function loadModels() {
     if (!listInfo) throw new Error("ComfyUI not reachable. Start it, or set the ComfyUI folder in Settings to list its models.");
   }
   const live = listInfo === objectInfo;
+  await checkNodes(live);
+  const install = needs.filter((m) => m.required).map((m) => m.name).join(", ");
   const fill = (id, items, auto) => {
     const prev = val(id); // keep an unsaved pick when testing the connection
     if (auto) items = [{ value: models.AUTO, label: "Auto" }].concat(items);
@@ -231,7 +236,10 @@ async function loadModels() {
   };
   const tag = { flux2: "Klein", kontext: "Kontext", fill: "Fill" };
   const list = models.listModels(listInfo);
-  if (!list.length) throw new Error(`No Flux.2 Klein, Kontext or Fill model found in ${live ? "ComfyUI" : "the ComfyUI models folder"}.`);
+  if (!list.length) {
+    throw new Error(install ? `No usable model. Install in ComfyUI: ${install} (links in Settings).`
+      : `No Flux.2 Klein, Kontext or Fill model found in ${live ? "ComfyUI" : "the ComfyUI models folder"}.`);
+  }
   fill("model", list.map((m) => ({ value: m.name, label: `${m.name}  (${tag[m.family]}${m.nunchaku ? ", Nunchaku" : ""})` })));
   fill("clip", models.encoderList(listInfo).map((n) => ({ value: n, label: n })), true);
   fill("vae", models.vaeList(listInfo).map((n) => ({ value: n, label: n })), true);
@@ -240,7 +248,25 @@ async function loadModels() {
   if (live) conn(true, val("model").replace(/\.(gguf|safetensors)$/, ""));
   status(live ? "Make a selection, then click " + ($("mode").value === "edit" ? "Edit." : "Clean.")
     : "ComfyUI is off: models listed from its folder. It starts on the first Clean.");
+  if (install) status(`Install in ComfyUI: ${install} (links in Settings).`, true);
+  else if (downloads.length) status(`This model still needs: ${downloads.map((f) => f.name).join(", ")} (download links in Settings).`, true);
   return live;
+}
+
+// Custom nodes (or a ComfyUI update) the user has to install, shown in Settings with links (models.missingNodes).
+// .gguf files are invisible to ComfyUI without ComfyUI-GGUF, so the models folder on disk is scanned too.
+async function checkNodes(live) {
+  const disk = live ? await scanModels(val("comfyDir").trim().replace(/[\\/]+$/, "")).catch(() => null) : listInfo;
+  const list = (cls, input) => (disk && disk[cls] ? disk[cls].input.required[input][0] : []);
+  const files = list("UNETLoader", "unet_name").concat(list("CLIPLoader", "clip_name"));
+  // node types the templates need from ComfyUI itself (1-3 = loaders, picked per model); unknown while offline
+  const core = live ? Object.values(await loadTemplates())
+    .flatMap((g) => Object.entries(g).filter(([id]) => !["1", "2", "3"].includes(id)).map(([, n]) => n.class_type)) : [];
+  needs = models.missingNodes(listInfo, files, core);
+  const box = $("needs");
+  box.innerHTML = "";
+  for (const m of needs) box.appendChild(needLine(m.name, m.url, m.why, m.required));
+  if (needs.length) box.appendChild(el("div", "need", "Install with ComfyUI Manager (search the name) or git clone into ComfyUI/custom_nodes, then restart ComfyUI."));
 }
 
 // ComfyUI's own folders for each list (folder_paths.py); sub folders show as "sub\name" like ComfyUI on Windows.
@@ -277,6 +303,22 @@ function showAutoPicks() {
     $("autoHint").textContent = e.message;
     $("autoHint").className = "hint err";
   }
+  // text encoder / VAE the selected model still needs, with download links
+  downloads = models.missingFiles(listInfo, { model: val("model"), clip: val("clip"), vae: val("vae") });
+  const box = $("needFiles");
+  box.innerHTML = "";
+  for (const f of downloads) box.appendChild(needLine(f.name, f.url, `download into ComfyUI/models/${f.folder}`, true));
+  if (downloads.length) box.appendChild(el("div", "need", "Then click Test connection (no ComfyUI restart needed)."));
+}
+
+// "name (link): why" line for Settings; the name opens the page in the browser
+function needLine(name, url, why, required) {
+  const line = el("div", "need" + (required ? " req" : ""));
+  const link = el("span", "need-link", name);
+  link.addEventListener("click", () => Promise.resolve().then(() => uxp.shell.openExternal(url, "Download / install page of " + name)).catch(() => {}));
+  line.appendChild(link);
+  line.appendChild(el("span", "", ": " + why));
+  return line;
 }
 
 async function loadTemplates() {
