@@ -8,6 +8,9 @@ const MAIN_FIELDS = ["mode", "prompt"]; // auto-saved as you use them
 const SETTINGS = ["pad", "stuck", "url", "comfyDir", "model", "clip", "vae", "steps", "colorMatch"]; // saved with the Save button
 const CLIENT = "ps_clean_" + Date.now();
 const SRGB = "sRGB IEC61966-2.1";
+// up here, not next to b64decode: if any top-level line below throws in Photoshop, consts after it stay
+// uninitialized ("Cannot access 'B64' before initialization" when cleaning)
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 // newest first; every result of this Photoshop session (memory only, gone when Photoshop closes).
 // ponytail: each result keeps its PNG as a data URL (~1-3 MB); a very long session grows memory, Clear frees it
 const jobs = [];
@@ -26,6 +29,7 @@ const DEFAULT_PRESETS = [
   { name: "Text", prompt: "Remove all text and lettering. Fill where the text was with the background around it, matching its color, texture and lines. Do not change anything else." },
   { name: "Text + bubble", prompt: "Remove the speech bubble and all text in it. Restore the artwork behind it so it continues naturally from the surroundings. Do not change anything else." },
   { name: "SFX", prompt: "Remove the sound effect lettering. Restore the artwork behind it so it continues naturally from the surroundings, with the same lines, colors and screentone. Do not change anything else." },
+  { name: "Watermark", prompt: "Remove the entire watermark completely: every letter, logo, icon, outline, shadow and semi-transparent overlay, plus any box, frame or plate it sits on. Leave no faint trace, ghost, blur or smudge. Restore the artwork behind it exactly as if the watermark was never there, continuing every line, edge, color, gradient, texture and screentone from the surroundings. Do not change anything else." },
   { name: "Object", prompt: "Remove the selected object. Fill the area with what should be behind it, matching the surroundings. Do not change anything else." },
 ];
 const presets = () => cfg.presets || DEFAULT_PRESETS;
@@ -36,13 +40,28 @@ uxp.entrypoints.setup({
   commands: { clean: () => clean().catch((e) => { fail(e); app.showAlert(e.message || String(e)); }) },
   panels: {
     main: {
-      show(node) { if (node && node !== document.body && !node.contains($("app"))) node.appendChild($("app")); },
+      show(node) { if (node && node !== document.body && !node.contains($("app"))) node.appendChild($("app")); rememberPanel(true); },
+      hide() { rememberPanel(false); },
     },
   },
 });
 
 // settings live in a JSON file in the plugin's data folder, so they survive Photoshop restarts
 let cfg = {};
+let cfgReady = false; // settings.json read; writing before that would wipe it
+
+// Photoshop doesn't reopen this panel after a restart, so the plugin does (start()) unless the user closed it.
+// ponytail: quitting Photoshop hides the panel too; the delay lets the quit win so that isn't saved as "closed".
+// A quit that takes over 2 s after hiding counts as a close; persist on destroy() if that bites.
+let panelTimer = null;
+function rememberPanel(open) {
+  clearTimeout(panelTimer);
+  panelTimer = setTimeout(() => {
+    if (!cfgReady || cfg.panelOpen === open) return;
+    cfg.panelOpen = open;
+    writeCfg().catch(() => {});
+  }, open ? 0 : 2000);
+}
 // "" = never set (e.g. model before the first Save): Back must not blank the auto-picked model
 const load = (f) => (cfg[f] === undefined || cfg[f] === "" ? null : cfg[f]);
 async function writeCfg() {
@@ -88,6 +107,8 @@ function showSavedPicks() {
 
 async function start() {
   try { cfg = JSON.parse(await (await (await fs.getDataFolder()).getEntry("settings.json")).read()); } catch (e) { cfg = {}; }
+  cfgReady = true;
+  if (cfg.panelOpen !== false) showPanel();
   fillFields(MAIN_FIELDS.concat(SETTINGS));
   showSavedPicks();
   if (!$("prompt").value) $("prompt").value = presets()[0] ? presets()[0].prompt : "";
@@ -294,9 +315,7 @@ async function clean() {
         jpeg = b64decode(await imaging.encodeImageData({ imageData: pix.imageData, base64: true }));
         pix.imageData.dispose();
         // exact selection at full res: layer mask in Photoshop, and the repaint mask for Flux
-        const s = await imaging.getSelection({ documentID: doc.id, sourceBounds: rect });
-        job.sel = await s.imageData.getData({ chunky: true });
-        s.imageData.dispose();
+        job.sel = await readSelection(doc.id, rect);
       } finally {
         await ctx.hostControl.resumeHistory(sid, false);
       }
@@ -446,6 +465,18 @@ public class CCWin {
   throw new Error("ComfyUI didn't come up within 3 minutes. Check its window (taskbar) for errors.");
 }
 
+// selection as one byte per pixel of rect. Photoshop may return only the selected part of rect
+// (its sourceBounds say which part), so place it; reading it as if it were all of rect gives a striped mask.
+async function readSelection(docId, rect) {
+  const s = await imaging.getSelection({ documentID: docId, sourceBounds: rect });
+  const b = s.sourceBounds || rect, pw = s.imageData.width, ph = s.imageData.height;
+  const part = await s.imageData.getData({ chunky: true });
+  s.imageData.dispose();
+  const w = rect.right - rect.left, out = new Uint8Array(w * (rect.bottom - rect.top));
+  for (let y = 0; y < ph; y++) out.set(part.subarray(y * pw, (y + 1) * pw), (b.top - rect.top + y) * w + (b.left - rect.left));
+  return out;
+}
+
 async function maskJpeg(job) {
   const rgb = new Uint8Array(job.sel.length * 3);
   for (let i = 0; i < job.sel.length; i++) rgb[i * 3] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = job.sel[i];
@@ -546,30 +577,38 @@ async function showPreview(job) {
   await tmp.write(b64decode(job.thumb).buffer, { format: formats.binary });
   try {
     await modal(async (ctx) => {
-      if (app.activeDocument.id !== doc.id) app.activeDocument = doc; // always the document the selection came from
+      // exact pixels: open the result as its own document, resize it there to exactly the crop size and copy the
+      // pixels in at the crop's corner. Placing it (placeEvent) let Photoshop rescale the smart object, and scaling
+      // and moving it back rounded the bounds -> the result landed a few pixels off.
+      const res = await app.open(tmp);
+      await res.resizeImage(job.w, job.h);
+      const pix = await imaging.getPixels({ documentID: res.id, componentSize: 8 });
+      await res.closeWithoutSaving();
+
+      app.activeDocument = doc; // always the document the selection came from
       const sid = await ctx.hostControl.suspendHistory({ documentID: doc.id, name: "Comfy Clean" });
       // keep whatever the user has selected now (maybe the next bubble)
       let userSel = null;
       if (doc.selection.bounds) {
         const r = clampRect(doc.selection.bounds, doc);
         const s = await imaging.getSelection({ documentID: doc.id, sourceBounds: r });
-        userSel = { r, data: s.imageData };
+        userSel = { r: s.sourceBounds || r, data: s.imageData }; // data may cover only part of r
       }
 
-      await play([{ _obj: "placeEvent", null: { _path: await fs.createSessionToken(tmp), _kind: "local" } }]);
+      await play([{ _obj: "make", _target: [{ _ref: "layer" }], using: { _obj: "layer", name: "Clean preview" } }]);
       const layer = doc.activeLayers[0];
-      let b = layer.bounds;
-      await layer.scale(100 * job.w / (b.right - b.left), 100 * job.h / (b.bottom - b.top), constants.AnchorPosition.TOPLEFT);
-      b = layer.bounds;
-      await layer.translate(job.rect.left - b.left, job.rect.top - b.top);
-      await layer.rasterize(constants.RasterizeType.ENTIRELAYER);
-      layer.name = "Clean preview";
+      // the result was made from all visible layers, so it goes on top of the stack, not above whatever layer was active
+      if (doc.layers[0].id !== layer.id) await layer.move(doc.layers[0], constants.ElementPlacement.PLACEBEFORE);
+      await imaging.putPixels({ documentID: doc.id, layerID: layer.id, imageData: pix.imageData, targetBounds: { left: job.rect.left, top: job.rect.top } });
+      pix.imageData.dispose();
 
-      // layer mask = the exact original selection, no expand/feather
+      // the exact original selection
       const m = await imaging.createImageDataFromBuffer(job.sel, { width: job.w, height: job.h, components: 1, chunky: true, colorSpace: "Grayscale" });
       await imaging.putSelection({ documentID: doc.id, imageData: m, replace: true, targetBounds: { left: job.rect.left, top: job.rect.top } });
       m.dispose();
-      await play([{ _obj: "make", new: { _class: "channel" }, at: { _ref: "channel", _enum: "channel", _value: "mask" }, using: { _enum: "userMaskEnabled", _value: "revealSelection" } }]);
+      // keep only the selected pixels of the result: Clear everything outside the selection
+      await play([{ _obj: "inverse" }]);
+      try { await play([{ _obj: "delete" }]); } catch (e) {} // nothing outside = nothing to clear
 
       if (userSel) {
         await imaging.putSelection({ documentID: doc.id, imageData: userSel.data, replace: true, targetBounds: { left: userSel.r.left, top: userSel.r.top } });
@@ -719,7 +758,7 @@ function stateText(job) {
   const s = job.state.charAt(0).toUpperCase() + job.state.slice(1);
   return s + "..." + (job.retries ? ` (retry ${job.retries})` : "");
 }
-render();
+try { render(); } catch (e) { fail(e); } // a throw here would stop the rest of this file from loading
 
 // ---------- ComfyUI I/O ----------
 
@@ -746,8 +785,6 @@ async function upload(base, name, bytes) {
 }
 
 function ascii(s) { return Uint8Array.from(s, (c) => c.charCodeAt(0)); }
-
-const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 function b64decode(s) {
   s = s.slice(s.indexOf(",") + 1).replace(/[^A-Za-z0-9+/]/g, "");

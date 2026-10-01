@@ -1,7 +1,7 @@
 """Runs the plugin's graphs (built by plugin/models.js) against a live ComfyUI the same way the plugin does:
 crop + selection mask in, result composited back through the mask, then checks the
 cleaned area matches the known clean background (no darker/lighter patch).
-Usage: python tests/test_workflow.py [--edit] [--model NAME] [--steps N] [--scene bubble] [--prompt TEXT]  (ComfyUI must be running on 127.0.0.1:8188)"""
+Usage: python tests/test_workflow.py [--edit] [--model NAME] [--steps N] [--scene bubble|tight] [--prompt TEXT]  (ComfyUI must be running on 127.0.0.1:8188)"""
 import json, random, subprocess, sys, time, urllib.parse, urllib.request, uuid
 from pathlib import Path
 import numpy as np
@@ -46,6 +46,13 @@ def make_scene():
     mask = Image.new("L", src.size, 0)
     ImageDraw.Draw(mask).rectangle([box[0] - 6, box[1] - 6, box[2] + 6, box[3] + 6], fill=255)
     return gt, src, mask
+
+
+def make_tight_scene():
+    """Same as make_scene, but the selection hugs the letters (lasso/magic wand + a few px), like real cleaning."""
+    gt, src, _ = make_scene()
+    ink = (np.abs(np.asarray(src, float) - np.asarray(gt, float)).sum(-1) > 30).astype(np.uint8) * 255
+    return gt, src, Image.fromarray(ink).filter(ImageFilter.MaxFilter(7))
 
 
 def upload(img, name):
@@ -100,8 +107,8 @@ def test_edit(src):
 
 
 if __name__ == "__main__":
-    bubble = "--scene" in sys.argv and sys.argv[sys.argv.index("--scene") + 1] == "bubble"
-    gt, src, mask = make_bubble_scene() if bubble else make_scene()
+    scene = sys.argv[sys.argv.index("--scene") + 1] if "--scene" in sys.argv else ""
+    gt, src, mask = {"bubble": make_bubble_scene, "tight": make_tight_scene}.get(scene, make_scene)()
     PROMPT = sys.argv[sys.argv.index("--prompt") + 1] if "--prompt" in sys.argv else \
         "remove the sound effect lettering, restore the background art behind it"
     if "--edit" in sys.argv:
