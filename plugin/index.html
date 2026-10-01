@@ -37,12 +37,14 @@
   textarea, sp-textfield { cursor: text; }
   .icon, .seg div, .icon-btn, .model-line, .btn, .filters div, .link, .job.ready, .x { cursor: pointer; }
   #app { height: 100%; display: flex; flex-direction: column; }
-  #content { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
-  /* main view: controls stay put, only the results list scrolls. The view is at least the panel's height and
-     grows only when the panel is too short for controls + a minimal list; then the whole view scrolls instead. */
-  #mainView { min-height: 100%; display: flex; flex-direction: column; }
+  /* main view: controls stay put, only the results list scrolls. Pure flex sizing, no percentages: UXP ignored
+     min-height: 100% here and the whole page scrolled. #content scrolls only when the panel is too short for the
+     controls + 120px of list (and always for Settings, which keeps its natural height). */
+  #content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 0 12px 12px; }
+  #content > * { flex: none; }
+  #content > #mainView { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   #mainView > * { flex: none; }
-  #mainView > #results { flex: 1; min-height: 150px; display: flex; flex-direction: column; }
+  #mainView > #results { flex: 1; min-height: 120px; display: flex; flex-direction: column; }
   #results > * { flex: none; }
   #results > #jobs { flex: 1; min-height: 0; overflow-y: auto; }
   #mainView.hidden { display: none; }
@@ -221,7 +223,7 @@
     <div class="status" id="status"></div>
 
     <div id="previewBar" class="preview-bar hidden">
-      <div class="pv">Previewing in document</div>
+      <div class="pv" id="pvTitle">Previewing in document</div>
       <div class="pv-sub">Apply keeps it, Discard removes it.</div>
       <div class="row btn-row">
         <div class="btn primary" id="apply">Apply</div>

@@ -35,14 +35,17 @@ async function run(withImaging) {
   global.fetch = () => Promise.reject(new Error("offline"));
   // a 100x200 document with a selection at 10,20 - 50,60
   const doc = withOverrides(anything(), { id: 1, width: 100, height: 200, title: "page.psd" });
-  const app = withOverrides(anything(), { activeDocument: doc, documents: [doc] });
+  const doc2 = withOverrides(anything(), { id: 2, width: 100, height: 200, title: "page2.psd" });
+  const appState = { activeDocument: doc, documents: [doc, doc2] };
+  const app = withOverrides(anything(), appState);
+  let onEvent = null; // Photoshop's notification listener (document switched / closed)
   const batchPlay = async (cmds) => cmds.map((c) => (c._obj === "get" && c._target[0]._property === "selection"
     ? { selection: { left: { _value: 10 }, top: { _value: 20 }, right: { _value: 50 }, bottom: { _value: 60 } } } : anything()));
   const getSelection = async ({ sourceBounds: b }) => {
     const w = b.right - b.left, h = b.bottom - b.top;
     return { sourceBounds: b, imageData: { width: w, height: h, getData: async () => new Uint8Array(w * h), dispose() {} } };
   };
-  const ps = { app, core: { executeAsModal: (fn) => fn(anything()) }, action: { batchPlay }, constants: anything(),
+  const ps = { app, core: { executeAsModal: (fn) => fn(anything()) }, action: { batchPlay, addNotificationListener: (evs, fn) => { onEvent = fn; } }, constants: anything(),
     imaging: withImaging ? withOverrides(anything(), { encodeImageData: async () => "AAAA", getSelection }) : undefined };
   const uxp = { storage: { localFileSystem: anything(), formats: anything() }, entrypoints: anything(), shell: anything() };
   const load = Module._load;
@@ -76,6 +79,14 @@ async function run(withImaging) {
   await P.applyPreview(); // Apply -> nothing comes up, even with one waiting
   assert.strictEqual(second.outcome, "applied");
   assert.strictEqual(P.shown(), null, "Apply doesn't show the next result");
+
+  // the list follows the document tab; closing a document drops its finished results
+  const count = () => els.count.textContent;
+  assert.strictEqual(count(), "3", "page.psd has its 3 results");
+  appState.activeDocument = doc2; onEvent("select");
+  assert.strictEqual(count(), "0", "page2.psd shows only its own results");
+  appState.documents = [doc2]; onEvent("close"); // page.psd closed
+  assert.strictEqual(P.jobs.length, 0, "a closed document's finished results are dropped");
   console.log(`${withImaging ? "imaging" : "2022"} path ok`);
 }
 

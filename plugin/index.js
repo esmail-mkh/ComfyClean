@@ -202,6 +202,7 @@ const play = (cmds) => action.batchPlay(cmds, {});
 const deselect = () => play([{ _obj: "set", _target: [{ _ref: "channel", _property: "selection" }], to: { _enum: "ordinal", _value: "none" } }]);
 const layerRef = (p) => [{ _ref: "layer", _id: p.layerId }, { _ref: "document", _id: p.docId }];
 const findDoc = (id) => app.documents.find((d) => d.id === id);
+const activeDocId = () => { try { return app.activeDocument ? app.activeDocument.id : null; } catch (e) { return null; } }; // null: none open
 const clampRect = (b, doc) => ({
   left: Math.max(0, Math.floor(b.left)), top: Math.max(0, Math.floor(b.top)),
   right: Math.min(doc.width, Math.ceil(b.right)), bottom: Math.min(doc.height, Math.ceil(b.bottom)),
@@ -366,9 +367,7 @@ async function clean() {
 // a new result is shown in the document right away (Apply / Discard), unless another result is on screen
 // or being placed, or the user moved to another document; then it waits in the list as "Ready"
 async function autoPreview(job) {
-  let active = null;
-  try { active = app.activeDocument; } catch (e) {} // no document open
-  if (cfg.autoPreview === false || preview || placing || !active || active.id !== job.docId) return;
+  if (cfg.autoPreview === false || preview || placing || activeDocId() !== job.docId) return;
   await showPreview(job).catch(() => status("Result ready. Click it to preview.")); // e.g. Photoshop busy in a dialog
 }
 
@@ -753,7 +752,8 @@ async function applyPreview() {
 // after Discard the next result still waiting (oldest first) takes its place, same rules as autoPreview
 // (not after Apply: the user looks at the applied result first and picks the next one from the list)
 async function previewNext() {
-  const next = jobs.slice().reverse().find((j) => j.state === "ready" && !j.outcome);
+  const doc = activeDocId();
+  const next = jobs.slice().reverse().find((j) => j.docId === doc && j.state === "ready" && !j.outcome);
   if (next) await autoPreview(next);
 }
 
@@ -814,17 +814,22 @@ function render() {
   $("modelName").textContent = model ? model.replace(/\.(gguf|safetensors)$/, "") : "Not chosen yet, click to pick";
   syncPresetPick();
   $("previewBar").className = "preview-bar" + (preview ? "" : " hidden");
-  $("count").textContent = String(jobs.length); // UXP shows nothing for the number 0
-  $("sessionStats").textContent = jobs.length
-    ? `${jobs.filter((j) => j.outcome === "applied").length} applied \u00b7 ${jobs.filter((j) => !finished(j)).length} running`
+  if (preview) $("pvTitle").textContent = "Previewing in " + preview.job.docName;
+  // the list shows the active document's results only; it follows the document tabs (see the listener below)
+  const docId = activeDocId();
+  const mine = jobs.filter((j) => j.docId === docId);
+  $("count").textContent = String(mine.length); // UXP shows nothing for the number 0
+  $("sessionStats").textContent = mine.length
+    ? `${mine.filter((j) => j.outcome === "applied").length} applied \u00b7 ${mine.filter((j) => !finished(j)).length} running`
     : "";
   for (const f of document.querySelectorAll("#filters div")) f.className = f.dataset.f === filter ? "on" : "";
 
-  const shown = jobs.filter((j) => filter === "all" || (filter === "applied" ? j.outcome === "applied" : !j.outcome));
+  const shown = mine.filter((j) => filter === "all" || (filter === "applied" ? j.outcome === "applied" : !j.outcome));
   const box = $("jobs");
   box.innerHTML = "";
   if (!shown.length) {
-    box.appendChild(el("div", "empty", jobs.length ? "Nothing here with this filter." : "Results of this session appear here."));
+    box.appendChild(el("div", "empty", docId === null ? "Open a document to see its results."
+      : mine.length ? "Nothing here with this filter." : "Results of this page appear here."));
   }
   for (const job of shown) {
     const active = preview && preview.job === job;
@@ -878,9 +883,22 @@ function pillFor(job, active) {
 
 for (const f of document.querySelectorAll("#filters div")) f.addEventListener("click", () => { filter = f.dataset.f; render(); });
 $("clearDone").addEventListener("click", () => {
-  for (const j of jobs.filter((j) => finished(j) && !(preview && preview.job === j))) removeJob(j);
-  status("Cleared finished results.");
+  const doc = activeDocId();
+  for (const j of jobs.filter((j) => j.docId === doc && finished(j) && !(preview && preview.job === j))) removeJob(j);
+  status("Cleared this page's finished results.");
 });
+
+// Results follow the document tab in Photoshop. A closed document's results can't be placed anymore: dropped
+// (its running jobs finish and are dropped on the next close/switch).
+try {
+  action.addNotificationListener(["select", "open", "close", "make"], (event) => {
+    if (event === "close") {
+      if (preview && !findDoc(preview.docId)) preview = null;
+      for (const j of jobs.filter((j) => finished(j) && !findDoc(j.docId))) removeJob(j);
+    }
+    render();
+  });
+} catch (e) {} // a throw here would stop the rest of this file from loading
 
 function stateText(job) {
   if (job.cancelled) return "Cancelling...";
