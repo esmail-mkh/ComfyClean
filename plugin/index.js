@@ -1011,7 +1011,10 @@ function fitPrompt() {
   const h = Math.max(64, lines * 14 + 10) + "px"; // 14px lines + padding
   if (t.style.height !== h) t.style.height = h;
 }
-window.addEventListener("resize", () => render()); // panel width changes the wrapping
+// panel width changes the prompt's wrapping. Only the prompt is redrawn (and only when its width changed): UXP fires
+// "resize" ~18 times a second while the panel is open, and a full render() each time rebuilt the results list
+// nonstop (~15% CPU, Apply / Discard / x replaced between press and release, so their clicks were lost)
+window.addEventListener("resize", () => { if ($("prompt").className === "hidden") showPromptView(); else fitPrompt(); });
 
 // UXP spaces wrapped text lines ~30px apart whatever line-height says: the view wraps the text itself into
 // fixed-height one-line rows, each a row of word boxes (.w, a fixed space between them). Line widths come from the
