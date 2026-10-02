@@ -400,7 +400,8 @@ async function clean() {
     const png = new Uint8Array(await (await fetch(`${job.base}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder)}&type=${img.type}`)).arrayBuffer());
     job.thumb = "data:image/png;base64," + b64encode(png); // the only copy; decoded again for previews
     job.state = "ready";
-    status("Result ready. Click it to preview.");
+    job.took = Date.now() - job.time;
+    status(`Result ready in ${dur(job.took)}. Click it to preview.`);
   } catch (e) {
     if (job.cancelled) return removeJob(job);
     job.state = "error";
@@ -687,7 +688,7 @@ function connectWs(base) {
     if (!job || job.state === "ready" || job.state === "error") return;
     if (m.type === "executing" || m.type === "execution_start") job.state = "running";
     // stuck-watchdog clock: starts when the sampler node starts, resets on every step
-    if (m.type === "executing") { job.sampling = d.node === job.sampler; job.tick = Date.now(); }
+    if (m.type === "executing") { job.sampling = d.node === job.sampler; job.tick = Date.now(); if (job.sampling) job.sampleStart = job.tick; }
     if (m.type === "progress") { job.state = "running"; job.progress = `${d.value}/${d.max}`; job.tick = Date.now(); }
     render();
   };
@@ -868,8 +869,28 @@ function thumbFor(job) {
   return img;
 }
 const pad2 = (n) => String(n).padStart(2, "0");
+// 42s, 3m 05s
+const dur = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${pad2(s % 60)}s`; };
+// " · 25s" elapsed since the click, plus " · ~12s left" once the sampler's steps give a pace
+function timing(job) {
+  const now = Date.now();
+  let t = " · " + dur(now - job.time);
+  const [v, m] = (job.progress || "0/1").split("/").map(Number);
+  if (job.state === "running" && job.sampleStart && v > 0 && v < m) {
+    t += ` · ~${dur((m - v) * (job.tick - job.sampleStart) / v - (now - job.tick))} left`;
+  }
+  return t;
+}
+// the timing text ticks every second while a job is being made, without rebuilding the list
+let ticker = null;
+function tick() {
+  const live = jobs.filter((j) => !finished(j));
+  for (const j of live) if (j.pillEl) j.pillEl.textContent = pillFor(j).text;
+  if (!live.length) { clearInterval(ticker); ticker = null; }
+}
 
 function render() {
+  if (!ticker && jobs.some((j) => !finished(j))) ticker = setInterval(tick, 1000);
   const edit = $("mode").value === "edit";
   for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === $("mode").value ? "on" : "";
   $("modeHint").textContent = edit
@@ -909,12 +930,12 @@ function render() {
     const top = el("div", "top");
     top.appendChild(el("span", "tag" + (job.edit ? " edit" : ""), job.edit ? "EDIT" : "CLEAN"));
     top.appendChild(el("span", "doc", job.docName));
-    top.appendChild(el("span", "time", `${pad2(job.time.getHours())}:${pad2(job.time.getMinutes())}`));
+    top.appendChild(el("span", "time", `${pad2(job.time.getHours())}:${pad2(job.time.getMinutes())}` + (job.took ? ` · ${dur(job.took)}` : "")));
     txt.appendChild(top);
     txt.appendChild(el("div", "title", job.prompt));
     const bottom = el("div", "bottom");
     if (active) bottom.appendChild(previewActions());
-    else { const pill = pillFor(job); bottom.appendChild(el("span", "pill " + pill.cls, pill.text)); }
+    else { const pill = pillFor(job); job.pillEl = bottom.appendChild(el("span", "pill " + pill.cls, pill.text)); }
     txt.appendChild(bottom);
     if (!finished(job)) {
       const bar = el("div", "bar"), fill = el("div");
@@ -963,7 +984,7 @@ function pillFor(job) {
     if (job.outcome === "discarded") return { cls: "grey", text: "Discarded \u00b7 click to preview" };
     return { cls: "green", text: "Ready \u00b7 click to preview" };
   }
-  return { cls: job.state === "retrying" ? "amber" : "blue", text: stateText(job) };
+  return { cls: job.state === "retrying" ? "amber" : "blue", text: stateText(job) + timing(job) };
 }
 
 for (const f of document.querySelectorAll("#filters div")) f.addEventListener("click", () => { filter = f.dataset.f; render(); });

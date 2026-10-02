@@ -60,7 +60,7 @@ async function run(withImaging) {
   const m = new Module(PLUGIN);
   m.filename = PLUGIN;
   m.paths = Module._nodeModulePaths(path.dirname(PLUGIN));
-  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;module.exports = { clean, autoPreview, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, shown: () => preview, needs: () => needs };", PLUGIN);
+  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;module.exports = { clean, autoPreview, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, shown: () => preview, needs: () => needs };", PLUGIN);
   Module._load = load;
   const P = m.exports;
   assert.strictEqual(P.legacy(), !withImaging, "legacy() picks the path from the Imaging API");
@@ -73,6 +73,13 @@ async function run(withImaging) {
   assert.deepStrictEqual(P.needs().map((m) => m.name), ["Update ComfyUI", "comfyui-inpaint-nodes"]);
   assert.ok(/Install in ComfyUI: Update ComfyUI/.test(els.status.textContent), "main view says what to install: " + els.status.textContent);
   global.fetch = () => Promise.reject(new Error("offline"));
+
+  // timing: elapsed since the click; time left from the sampler's pace (2 of 4 steps in 10s -> ~10s left)
+  const now = Date.now();
+  assert.strictEqual(P.timing({ time: new Date(now - 25000), state: "queued" }), " · 25s");
+  assert.strictEqual(P.timing({ time: new Date(now - 75000), state: "running", progress: "2/4", sampleStart: now - 10000, tick: now }),
+    " · 1m 15s · ~10s left");
+  assert.ok(!/left/.test(P.timing({ time: new Date(now), state: "running", progress: "4/4", sampleStart: now - 9, tick: now })), "no estimate once sampling is done");
 
   await P.clean().catch((e) => { throw new Error("clean threw: " + e.stack); });
   const job = P.jobs[0];
