@@ -755,7 +755,7 @@ async function waitResult(job) {
       const pos = pending.findIndex((p) => p[1] === job.pid);
       job.queuePos = pos + 1;
       if (pos < 0 && q.queue_running.some((p) => p[1] === job.pid)) job.state = "running";
-      render();
+      refreshLive();
     }
   }
 }
@@ -773,7 +773,7 @@ function connectWs(base) {
     // stuck-watchdog clock: starts when the sampler node starts, resets on every step
     if (m.type === "executing") { job.sampling = d.node === job.sampler; job.tick = Date.now(); if (job.sampling) job.sampleStart = job.tick; }
     if (m.type === "progress") { job.state = "running"; job.progress = `${d.value}/${d.max}`; job.tick = Date.now(); }
-    render();
+    refreshLive();
   };
 }
 
@@ -950,7 +950,7 @@ function syncPresetPick() {
 
 const finished = (j) => j.state === "ready" || j.state === "error";
 
-// render() rebuilds the list on every progress tick; a fresh <img> decodes the 1-3 MB PNG again and blinks empty
+// render() rebuilds the list (documents switched, jobs added or finished); a fresh <img> decodes the 1-3 MB PNG again and blinks empty
 // meanwhile, so each result keeps one <img> that is just moved into the new row
 const thumbs = new WeakMap();
 function thumbFor(job) {
@@ -971,11 +971,21 @@ function timing(job) {
   }
   return t;
 }
-// the timing text ticks every second while a job is being made, without rebuilding the list
+// Progress (a ComfyUI message per sampler step, the queue position, the timing tick every second) only updates the
+// live rows' pill and bar in place: rebuilding the list several times a second replaced the Apply / Discard / x
+// buttons of a finished result between press and release, so clicks on them were lost while another job ran.
 let ticker = null;
-function tick() {
+const barWidth = (job) => {
+  const [v, m] = (job.progress || "0/1").split("/").map(Number);
+  return (job.state === "running" ? Math.max(4, Math.round(100 * v / m)) : 0) + "%";
+};
+function refreshLive() {
   const live = jobs.filter((j) => !finished(j));
-  for (const j of live) if (j.pillEl) j.pillEl.textContent = pillFor(j).text;
+  for (const j of live) {
+    const pill = pillFor(j);
+    if (j.pillEl) { j.pillEl.textContent = pill.text; j.pillEl.className = "pill " + pill.cls; }
+    if (j.barEl) j.barEl.style.width = barWidth(j);
+  }
   if (!live.length) { clearInterval(ticker); ticker = null; }
 }
 
@@ -1041,7 +1051,7 @@ function showPromptView() {
 
 function render() {
   if ($("prompt").className === "hidden") showPromptView(); else fitPrompt();
-  if (!ticker && jobs.some((j) => !finished(j))) ticker = setInterval(tick, 1000);
+  if (!ticker && jobs.some((j) => !finished(j))) ticker = setInterval(refreshLive, 1000);
   const edit = $("mode").value === "edit";
   for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === $("mode").value ? "on" : "";
   $("modeHint").textContent = edit
@@ -1094,10 +1104,10 @@ function render() {
     }
     txt.appendChild(bottom);
     if (!finished(job)) {
-      const bar = el("div", "bar"), fill = el("div");
-      const [v, m] = (job.progress || "0/1").split("/").map(Number);
-      fill.style.width = (job.state === "running" ? Math.max(4, Math.round(100 * v / m)) : 0) + "%";
-      bar.appendChild(fill); txt.appendChild(bar);
+      const bar = el("div", "bar");
+      job.barEl = bar.appendChild(el("div"));
+      job.barEl.style.width = barWidth(job);
+      txt.appendChild(bar);
     }
     row.appendChild(txt);
 
