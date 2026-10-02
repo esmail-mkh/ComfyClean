@@ -29,7 +29,7 @@ let starting = null; // shared promise while the plugin is starting ComfyUI
 
 // first-run presets; after that the user's list lives in settings.json (cfg.presets)
 const DEFAULT_PRESETS = [
-  { name: "Text (auto)", prompt: "Remove all text and lettering. If the text is inside a speech bubble, keep the bubble exactly as it is: same shape, outline, tail and fill, and fill where the text was with the bubble's own clean fill. If the text is on the artwork, fill where it was with the background around it, continuing its lines, colors, texture and screentone. Do not change anything else; keep every other line, color and detail identical." },
+  { name: "Text (auto)", prompt: "Remove all text and lettering. Fill where each letter was with exactly what is directly around it: if the area around the text is flat and plain, keep it flat and plain with the same color; if it is artwork, continue its lines, colors, texture and screentone. Do not add anything new. Do not change anything else; keep every other line, color and detail identical." },
   { name: "Text, keep bubble", prompt: "Remove all text and lettering. Keep the speech bubble exactly as it is: same shape, outline, tail and white fill. Fill where the text was with the same clean background as the rest of the bubble. Do not change anything else; keep every line, color and detail identical." },
   { name: "Text", prompt: "Remove all text and lettering. Fill where the text was with the background around it, matching its color, texture and lines. Do not change anything else." },
   { name: "Text + bubble", prompt: "Remove the speech bubble and all text in it. Restore the artwork behind it so it continues naturally from the surroundings. Do not change anything else." },
