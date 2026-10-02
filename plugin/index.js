@@ -622,9 +622,9 @@ async function readSelection(docId, rect) {
 }
 
 // Edit: the result's top and bottom rows fade into the original, so a slight color shift doesn't show as a hard line.
-// ponytail: fixed ramp (h/20, at most 24px), not on the Photoshop 2022 path (selection comes from a channel there)
+// ponytail: fixed ramp (h/14, at most 32px), not on the Photoshop 2022 path (selection comes from a channel there)
 function fadeEdges(sel, w, h) {
-  const f = Math.min(24, Math.floor(h / 20)), out = sel.slice();
+  const f = Math.min(32, Math.floor(h / 14)), out = sel.slice();
   for (let i = 0; i < f; i++) {
     const t = (i + 1) / (f + 1), k = t * t * (3 - 2 * t); // smoothstep
     for (const y of [i, h - 1 - i]) for (let x = 0; x < w; x++) out[y * w + x] = Math.round(out[y * w + x] * k);
