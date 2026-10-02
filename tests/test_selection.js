@@ -1,6 +1,7 @@
 // node tests/test_selection.js -- readSelection (plugin/index.js) places a partial getSelection result at the right spot
 const src = require("fs").readFileSync(__dirname + "/../plugin/index.js", "utf8");
-const fn = src.slice(src.indexOf("async function readSelection"), src.indexOf("async function maskJpeg"));
+const start = src.indexOf("async function readSelection");
+const fn = src.slice(start).match(/^[^]*?\r?\n\}\r?\n/)[0]; // up to the function's closing brace (file may be CRLF)
 const rect = { left: 0, top: 10, right: 6, bottom: 14 }; // 6x4
 const fakeImaging = (bounds, data) => ({ getSelection: async () => ({ sourceBounds: bounds,
   imageData: { width: bounds.right - bounds.left, height: bounds.bottom - bounds.top, getData: async () => data, dispose() {} } }) });
