@@ -37,7 +37,7 @@
   /* UXP keeps the last cursor (text I-beam, resize grabber) unless every area sets its own */
   body { color: var(--text); font-size: 12px; cursor: default; }
   textarea, sp-textfield { cursor: text; }
-  .icon, .seg div, .icon-btn, .model-line, .btn, .filters div, .link, .job.ready, .x { cursor: pointer; }
+  .icon, .seg div, .icon-btn, .btn, .filters div, .link, .job.ready, .x { cursor: pointer; }
   #app { height: 100%; display: flex; flex-direction: column; }
   /* main view: controls stay put, only the results list scrolls. Pure flex sizing, no percentages: UXP ignored
      min-height: 100% here and the whole page scrolled. Each page is its own scroll container straight under #app:
@@ -107,17 +107,16 @@
   .preset-add { margin-top: 8px; padding: 8px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
   .preset-add .row { margin-top: 6px; }
   .preset-add sp-button { flex: 1; }
-  /* height set by fitPrompt(): UXP's textarea can't be scrolled, so it grows to show the whole prompt */
+  /* UXP's textarea (a native Windows edit box) can't scroll, and refuses typing past 256 characters without maxlength,
+     and inside a scrolled box it isn't drawn at all: fitPrompt() sets its height (full while typing, capped otherwise) */
   textarea { display: block; width: 100%; height: 64px; min-height: 64px; margin-top: 9px; }
   sp-textfield, sp-picker { width: 100%; }
   sp-button { width: 100%; }
 
   .go { margin-top: 10px; }
   .model-line { display: flex; align-items: center; height: 28px; margin-top: 10px; padding: 0 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
-  .model-line:hover { border-color: var(--muted); }
   .model-line .k { flex: none; height: 28px; line-height: 28px; margin-right: 8px; font-size: 9px; font-weight: bold; letter-spacing: 1px; color: var(--faint); }
-  .model-line .v { flex: 1; height: 28px; line-height: 28px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .model-line .c { flex: none; height: 28px; line-height: 28px; margin-left: 8px; font-size: 10px; color: var(--accent); }
+  .model-line sp-picker { flex: 1; width: auto; min-width: 0; }
   .btn { height: 32px; line-height: 32px; border-radius: 9px; text-align: center; font-weight: bold; letter-spacing: 0.3px; }
   .btn.primary { color: #fff; background: var(--accent); background-image: linear-gradient(135deg, var(--accent), var(--accent-2)); }
   .btn.primary:hover { background-image: linear-gradient(135deg, #5d9bf7, #9a80f3); }
@@ -226,11 +225,12 @@
           <sp-button id="presetCancel" variant="secondary">Cancel</sp-button>
         </div>
       </div>
-      <textarea id="prompt" placeholder="Describe what to do with the selection"></textarea>
+      <textarea id="prompt" maxlength="20000" placeholder="Describe what to do with the selection"></textarea>
     </div>
 
-    <div class="model-line" id="modelLine" title="Model used for the next job. Click to change it in Settings.">
-      <span class="k">MODEL</span><span class="v" id="modelName"></span><span class="c">Change</span>
+    <div class="model-line" title="Model used for the next job (also the Settings pick)">
+      <span class="k">MODEL</span>
+      <sp-picker id="modelQuick" size="s" quiet placeholder="Start ComfyUI to list models"><sp-menu slot="options"></sp-menu></sp-picker>
     </div>
     <div class="go"><div class="btn primary big" id="go">Clean selection</div></div>
     <div class="status" id="status"></div>

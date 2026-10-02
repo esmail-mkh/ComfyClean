@@ -144,4 +144,5 @@ for (const [, id] of fs.readFileSync(PLUGIN, "utf8").matchAll(/\$\("([\w-]+)"\)/
 (async () => {
   await run(true);
   await run(false);
+  process.exit(0); // the plugin's ComfyUI online poll (setInterval) would keep node running
 })().catch((e) => { console.error(e.message); process.exit(1); });

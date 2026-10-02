@@ -25,6 +25,7 @@ let ws = null;
 let objectInfo = null; // ComfyUI /object_info, cached by loadModels
 let listInfo = null; // what the model pickers show: objectInfo, or the ComfyUI folder scan while ComfyUI is off
 let templates = null; // plugin/workflows/*.json
+let promptFocused = false; // the prompt box has the caret (fitPrompt)
 let starting = null; // shared promise while the plugin is starting ComfyUI
 
 // first-run presets; after that the user's list lives in settings.json (cfg.presets)
@@ -75,7 +76,7 @@ async function writeCfg() {
 }
 // Settings use Photoshop's Spectrum controls (sp-textfield / sp-picker): plain <input>/<select> render badly
 // in panels, and a <select> filled from JS often doesn't show its options. Every read/write goes through val/setVal.
-const PICKERS = new Set(["model", "clip", "vae", "presetPick"]);
+const PICKERS = new Set(["model", "clip", "vae", "presetPick", "modelQuick"]);
 const menuItems = (id) => [...$(id).querySelectorAll("sp-menu-item")];
 function val(id) {
   if (!PICKERS.has(id)) return $(id).value || "";
@@ -108,7 +109,10 @@ function showSavedPicks() {
     const v = load(id) || (id === "model" ? "" : models.AUTO);
     if (v && !menuItems(id).length) { fillPicker(id, [{ value: v, label: v === models.AUTO ? "Auto" : v }]); setVal(id, v); }
   }
+  mirrorModels();
 }
+// the main view's model dropdown lists the same items as the Settings one (render keeps its pick in step)
+const mirrorModels = () => fillPicker("modelQuick", menuItems("model").map((m) => ({ value: m.getAttribute("value"), label: m.textContent })));
 
 async function start() {
   try { cfg = JSON.parse(await (await (await fs.getDataFolder()).getEntry("settings.json")).read()); } catch (e) { cfg = {}; }
@@ -150,6 +154,8 @@ $("presetDel").addEventListener("click", () => {
 $("prompt").addEventListener("change", () => save("prompt"));
 $("prompt").addEventListener("input", () => render());
 $("prompt").addEventListener("keyup", fitPrompt); // Enter doesn't always fire "input" in UXP
+$("prompt").addEventListener("focus", () => { promptFocused = true; fitPrompt(); });
+$("prompt").addEventListener("blur", () => { promptFocused = false; fitPrompt(); });
 for (const b of document.querySelectorAll("#modeSeg div")) {
   b.addEventListener("click", () => { $("mode").value = b.dataset.v; save("mode"); render(); });
 }
@@ -168,7 +174,16 @@ const showSettings = (on) => {
   render(); // model row follows the Settings pick
 };
 $("gear").addEventListener("click", () => showSettings(true));
-$("modelLine").addEventListener("click", () => showSettings(true));
+// a pick on the main view is saved right away and becomes the Settings pick too
+$("modelQuick").addEventListener("change", () => {
+  const v = val("modelQuick");
+  if (!v || v === val("model")) return;
+  setVal("model", v);
+  save("model");
+  showAutoPicks();
+  render();
+  if ($("dot").className === "dot ok") conn(true, v.replace(/\.(gguf|safetensors)$/, ""));
+});
 const fillChecks = () => { $("legacy").checked = !!cfg.legacy; $("autoPreview").checked = cfg.autoPreview !== false; }; // auto preview: on unless turned off
 $("back").addEventListener("click", () => { fillFields(SETTINGS); fillChecks(); showSettings(false); });
 $("saveSettings").addEventListener("click", async () => {
@@ -242,6 +257,7 @@ async function loadModels() {
       : `No Flux.2 Klein, Kontext or Fill model found in ${live ? "ComfyUI" : "the ComfyUI models folder"}.`);
   }
   fill("model", list.map((m) => ({ value: m.name, label: `${m.name}  (${tag[m.family]}${m.nunchaku ? ", Nunchaku" : ""})` })));
+  mirrorModels();
   fill("clip", models.encoderList(listInfo).map((n) => ({ value: n, label: n })), true);
   fill("vae", models.vaeList(listInfo).map((n) => ({ value: n, label: n })), true);
   showAutoPicks();
@@ -434,6 +450,18 @@ async function reachable(base) {
     return r.ok;
   } catch (e) { return false; }
 }
+
+// ComfyUI closed outside the plugin (its window shut) -> the dot goes offline; started outside -> models load, dot goes live
+let polling = false;
+setInterval(async () => {
+  if (starting || polling || !cfgReady) return;
+  polling = true;
+  try {
+    const up = await reachable(baseUrl()), shown = $("dot").className === "dot ok";
+    if (shown && !up) { objectInfo = null; conn(false, "ComfyUI offline"); }
+    else if (!shown && up) await loadModels().catch(() => {});
+  } finally { polling = false; }
+}, 10000);
 
 async function ensureComfy(job) {
   if (await reachable(job.base)) return;
@@ -902,11 +930,13 @@ function tick() {
   if (!live.length) { clearInterval(ticker); ticker = null; }
 }
 
-// UXP's textarea can't be scrolled: it grows to fit the whole prompt instead (the page scrolls if it gets long).
-// ponytail: word wrap simulated with an average glyph width (~5.3px measured in Photoshop, 5.5 to stay safe), not measured text
+// UXP's textarea is a native edit box that can't scroll, and inside a scrolled box it isn't drawn at all (its 256
+// character typing limit is lifted by maxlength in index.html). So it fits its text plus one spare line while you
+// type; otherwise it's capped at 150px so a long prompt doesn't push the page down.
+// ponytail: word wrap simulated with an average glyph width (~5.3px measured, 5.5 to stay safe), not measured text
 function fitPrompt() {
   const t = $("prompt"), per = Math.max(10, Math.floor(((t.offsetWidth || 0) - 12 || 280) / 5.5));
-  let lines = 0;
+  let lines = promptFocused ? 1 : 0;
   for (const para of t.value.split(/\r\n|\r|\n/)) { // the Windows textarea may give \r alone
     let cur = 0;
     lines++;
@@ -914,7 +944,9 @@ function fitPrompt() {
       if (cur && cur + 1 + w.length > per) { lines++; cur = w.length; } else cur += (cur ? 1 : 0) + w.length;
     }
   }
-  t.style.height = Math.max(64, lines * 15 + 16) + "px"; // ~14.5px lines + padding
+  const full = Math.max(64, lines * 15 + 10); // ~15px lines + padding
+  const h = (promptFocused ? full : Math.min(full, 150)) + "px";
+  if (t.style.height !== h) t.style.height = h;
 }
 window.addEventListener("resize", fitPrompt); // panel width changes the wrapping
 
@@ -928,8 +960,8 @@ function render() {
     : "Selection is the mask. A full-width strip around it is sent as context.";
   $("go").textContent = edit ? "Edit selection" : "Clean selection";
   // the model the next job will use: the Settings pick, or the saved one while ComfyUI is offline/starting
-  const model = val("model") || load("model");
-  $("modelName").textContent = model ? model.replace(/\.(gguf|safetensors)$/, "") : "Not chosen yet, click to pick";
+  const model = val("model") || load("model") || "";
+  if (val("modelQuick") !== model) setVal("modelQuick", model);
   syncPresetPick();
   // the list shows the active document's results only; it follows the document tabs (see the listener below)
   const docId = activeDocId();
