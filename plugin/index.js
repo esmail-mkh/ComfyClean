@@ -25,7 +25,6 @@ let ws = null;
 let objectInfo = null; // ComfyUI /object_info, cached by loadModels
 let listInfo = null; // what the model pickers show: objectInfo, or the ComfyUI folder scan while ComfyUI is off
 let templates = null; // plugin/workflows/*.json
-let promptFocused = false; // the prompt box has the caret (fitPrompt)
 let starting = null; // shared promise while the plugin is starting ComfyUI
 
 // first-run presets; after that the user's list lives in settings.json (cfg.presets)
@@ -154,8 +153,18 @@ $("presetDel").addEventListener("click", () => {
 $("prompt").addEventListener("change", () => save("prompt"));
 $("prompt").addEventListener("input", () => render());
 $("prompt").addEventListener("keyup", fitPrompt); // Enter doesn't always fire "input" in UXP
-$("prompt").addEventListener("focus", () => { promptFocused = true; fitPrompt(); });
-$("prompt").addEventListener("blur", () => { promptFocused = false; fitPrompt(); });
+// click the prompt to edit it; leaving the box shows the scrolling view again
+$("promptView").addEventListener("click", () => {
+  $("promptView").className = "prompt-view hidden";
+  $("prompt").className = "";
+  fitPrompt();
+  setTimeout(() => $("prompt").focus(), 0); // the textarea has to be laid out first
+});
+$("prompt").addEventListener("blur", () => {
+  $("prompt").className = "hidden";
+  $("promptView").className = "prompt-view";
+  render();
+});
 for (const b of document.querySelectorAll("#modeSeg div")) {
   b.addEventListener("click", () => { $("mode").value = b.dataset.v; save("mode"); render(); });
 }
@@ -930,28 +939,68 @@ function tick() {
   if (!live.length) { clearInterval(ticker); ticker = null; }
 }
 
-// UXP's textarea is a native edit box that can't scroll, and inside a scrolled box it isn't drawn at all (its 256
-// character typing limit is lifted by maxlength in index.html). So it fits its text plus one spare line while you
-// type; otherwise it's capped at 150px so a long prompt doesn't push the page down.
-// ponytail: word wrap simulated with an average glyph width (~5.3px measured, 5.5 to stay safe), not measured text
+// UXP's textarea can't scroll (text past its bottom is just hidden): the prompt is read in #promptView, which scrolls,
+// and the textarea shows only while typing, one spare line taller than its text.
+// fits(line) says whether a line fits the width
+function wrapLines(text, fits) {
+  const out = [];
+  for (const para of text.split(/\r\n|\r|\n/)) { // the Windows textarea may give \r alone
+    let cur = "";
+    for (const w of para.split(" ")) {
+      const next = cur ? cur + " " + w : w;
+      if (cur && !fits(next)) { out.push(cur); cur = w; } else cur = next;
+    }
+    out.push(cur);
+  }
+  return out;
+}
+// ponytail: the textarea's wrap is estimated with an average glyph width (~5.3px measured, 5.5 to stay safe)
 function fitPrompt() {
   const t = $("prompt"), per = Math.max(10, Math.floor(((t.offsetWidth || 0) - 12 || 280) / 5.5));
-  let lines = promptFocused ? 1 : 0;
-  for (const para of t.value.split(/\r\n|\r|\n/)) { // the Windows textarea may give \r alone
-    let cur = 0;
-    lines++;
-    for (const w of para.split(" ")) {
-      if (cur && cur + 1 + w.length > per) { lines++; cur = w.length; } else cur += (cur ? 1 : 0) + w.length;
-    }
-  }
-  const full = Math.max(64, lines * 15 + 10); // ~15px lines + padding
-  const h = (promptFocused ? full : Math.min(full, 150)) + "px";
+  const lines = wrapLines(t.value, (s) => s.length <= per).length + 1;
+  const h = Math.max(64, lines * 14 + 10) + "px"; // 14px lines + padding
   if (t.style.height !== h) t.style.height = h;
 }
-window.addEventListener("resize", fitPrompt); // panel width changes the wrapping
+window.addEventListener("resize", () => render()); // panel width changes the wrapping
+
+// UXP spaces wrapped text lines ~30px apart whatever line-height says: the view wraps the text itself into
+// fixed-height one-line rows, each a row of word boxes (.w, a fixed space between them). Line widths come from the
+// words' real widths, read from those boxes once UXP has laid them out: the first draw of new words uses a safe
+// estimate, then the view redraws with the real widths.
+const VIEW_LINES = 7; // rows that fit .prompt-view's 110px; more -> a scrollbar takes ~12px of the width
+const SPACE = 3.5; // .prompt-view .w margin-right: a Segoe UI space at 9.5pt
+const ESTIMATE = 5.6; // px per character, a bit over the widest average seen (5.47): estimated lines never overflow
+const wordWidths = new Map(); // word -> px in the view font
+function textWidth(s) {
+  const words = s.split(" ");
+  return words.reduce((sum, w) => sum + (wordWidths.has(w) ? wordWidths.get(w) : w.length * ESTIMATE), 0) + (words.length - 1) * SPACE;
+}
+function showPromptView() {
+  const box = $("promptView"), v = $("prompt").value, inner = (box.offsetWidth || 0) - 7 || 270; // padding + border
+  if (box.shown === inner + "|" + v) return; // render() runs on every progress update: rebuilding would reset the scroll
+  box.shown = inner + "|" + v;
+  box.innerHTML = "";
+  if (!v) return box.appendChild(el("div", "ln")).appendChild(el("div", "w ph", $("prompt").placeholder));
+  let lines = wrapLines(v, (s) => textWidth(s) <= inner);
+  if (lines.length > VIEW_LINES) lines = wrapLines(v, (s) => textWidth(s) <= inner - 12);
+  const fresh = [];
+  for (const line of lines) {
+    const row = box.appendChild(el("div", "ln"));
+    for (const w of line.split(" ")) {
+      const d = row.appendChild(el("div", "w", w || "\u00a0")); // an empty line keeps its height
+      if (w && !wordWidths.has(w)) fresh.push([w, d]);
+    }
+  }
+  if (!fresh.length || !box.offsetWidth) return;
+  setTimeout(() => {
+    let real = false;
+    for (const [w, d] of fresh) { real = real || d.offsetWidth > 0; wordWidths.set(w, d.offsetWidth || w.length * ESTIMATE); }
+    if (real) { box.shown = null; render(); } // redraw with the real widths
+  }, 50);
+}
 
 function render() {
-  fitPrompt();
+  if ($("prompt").className === "hidden") showPromptView(); else fitPrompt();
   if (!ticker && jobs.some((j) => !finished(j))) ticker = setInterval(tick, 1000);
   const edit = $("mode").value === "edit";
   for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === $("mode").value ? "on" : "";
