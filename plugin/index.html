@@ -138,27 +138,27 @@
   .stats { margin: -2px 0 7px; font-size: 10px; color: var(--faint); }
 
   .empty { padding: 18px 12px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 11px; }
-  .job { display: flex; align-items: center; padding: 7px; margin-bottom: 6px; border-radius: 10px; background: var(--card); border: 1px solid transparent; }
+  /* two lines per result (tag + prompt + time, then status); fixed heights: UXP gave each text line ~30px */
+  .job { display: flex; align-items: center; padding: 6px; margin-bottom: 5px; border-radius: 10px; background: var(--card); border: 1px solid transparent; }
   .job.ready:hover { background: var(--card-hover); border-color: var(--line); }
   .job.active { border-color: var(--accent); background: var(--accent-soft); }
   .job.discarded { opacity: 0.6; }
-  .thumb { width: 64px; height: 48px; margin-right: 9px; border-radius: 7px; background: var(--card-hover); object-fit: cover; }
+  .thumb { flex: none; width: 52px; height: 40px; margin-right: 8px; border-radius: 6px; background: var(--card-hover); object-fit: cover; }
   .thumb.pending { background: var(--accent-soft); }
   .job .txt { flex: 1; overflow: hidden; }
-  .job .top { display: flex; align-items: center; }
-  .tag { height: 14px; line-height: 14px; padding: 0 5px; margin-right: 6px; border-radius: 4px; font-size: 9px; font-weight: bold; letter-spacing: 0.4px; background: var(--accent-soft); color: var(--accent); }
+  .job .top { display: flex; align-items: center; height: 16px; }
+  .tag { flex: none; height: 14px; line-height: 14px; padding: 0 5px; margin-right: 6px; border-radius: 4px; font-size: 9px; font-weight: bold; letter-spacing: 0.4px; background: var(--accent-soft); color: var(--accent); }
   .tag.edit { background: rgba(138, 108, 240, 0.18); color: var(--accent-2); }
-  .doc { flex: 1; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .time { margin-left: 6px; font-size: 10px; color: var(--faint); }
-  .job .title { margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .job .bottom { margin-top: 4px; }
-  .pill { display: inline-block; height: 16px; line-height: 16px; padding: 0 7px; border-radius: 8px; font-size: 10px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job .title { flex: 1; min-width: 0; height: 16px; line-height: 16px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .time { flex: none; margin-left: 6px; height: 16px; line-height: 16px; font-size: 10px; color: var(--faint); }
+  .job .bottom { display: flex; align-items: center; min-height: 16px; margin-top: 5px; }
+  .pill { display: inline-block; min-width: 0; height: 16px; line-height: 16px; padding: 0 7px; border-radius: 8px; font-size: 10px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pill.green { background: var(--ok-soft); color: var(--ok); }
   .pill.blue { background: var(--accent-soft); color: var(--accent); }
   .pill.amber { background: var(--warn-soft); color: var(--warn); }
   .pill.red { background: var(--err-soft); color: var(--err); white-space: normal; height: auto; }
   .pill.grey { background: var(--card-hover); color: var(--muted); }
-  .bar { height: 3px; margin-top: 6px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .bar { height: 3px; margin-top: 5px; border-radius: 2px; background: var(--line); overflow: hidden; }
   .bar div { height: 3px; background: var(--accent); background-image: linear-gradient(90deg, var(--accent), var(--accent-2)); }
   .x { width: 22px; height: 22px; margin-left: 6px; border-radius: 11px; text-align: center; line-height: 22px; color: var(--faint); }
   .x:hover { background: var(--card-hover); color: var(--err); }

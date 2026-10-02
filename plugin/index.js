@@ -929,10 +929,10 @@ function render() {
     const txt = el("div", "txt");
     const top = el("div", "top");
     top.appendChild(el("span", "tag" + (job.edit ? " edit" : ""), job.edit ? "EDIT" : "CLEAN"));
-    top.appendChild(el("span", "doc", job.docName));
+    top.appendChild(el("span", "title", job.prompt)); // the list only shows this document's results: no file name
     top.appendChild(el("span", "time", `${pad2(job.time.getHours())}:${pad2(job.time.getMinutes())}` + (job.took ? ` · ${dur(job.took)}` : "")));
     txt.appendChild(top);
-    txt.appendChild(el("div", "title", job.prompt));
+    row.title = job.prompt;
     const bottom = el("div", "bottom");
     if (active) bottom.appendChild(previewActions());
     else { const pill = pillFor(job); job.pillEl = bottom.appendChild(el("span", "pill " + pill.cls, pill.text)); }
