@@ -197,6 +197,7 @@
 
   /* flex, not text-align: UXP centers text + <b> wrongly, pushing the credit past the panel edge */
   footer { flex: none; display: flex; justify-content: center; align-items: center; height: 30px; white-space: nowrap; border-top: 1px solid var(--line); font-size: 10px; color: var(--faint); }
+  footer #version { margin-left: 4px; }
   footer b, .credit { margin-left: 4px; color: var(--text); font-weight: bold; }
 </style>
 </head>
@@ -331,7 +332,7 @@
     </div>
   </div>
 
-  <footer>Comfy Clean &middot; designed by<b>E.MKH</b></footer>
+  <footer>Comfy Clean<span id="version"></span>&nbsp;&middot; designed by<b>E.MKH</b></footer>
 </div>
 <script src="index.js"></script>
 </body>

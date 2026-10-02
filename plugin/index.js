@@ -104,6 +104,8 @@ function fillPicker(id, items) {
 const save = (f) => { cfg[f] = val(f); writeCfg().catch(fail); };
 const fillFields = (names) => { for (const f of names) if (load(f) !== null) setVal(f, load(f)); };
 
+$("version").textContent = "v" + ((uxp.versions && uxp.versions.plugin) || ""); // manifest.json "version"
+
 function showSavedPicks() {
   for (const id of ["model", "clip", "vae"]) {
     const v = load(id) || (id === "model" ? "" : models.AUTO);
