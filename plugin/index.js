@@ -123,6 +123,9 @@ async function start() {
   fillFields(MAIN_FIELDS.concat(SETTINGS));
   fillChecks();
   showSavedPicks();
+  // a picked preset is remembered by name, so an improved preset text (plugin update) shows up by itself
+  const picked = presets().find((x) => x.name === cfg.presetName);
+  if (picked) $("prompt").value = picked.prompt;
   if (!$("prompt").value) $("prompt").value = presets()[0] ? presets()[0].prompt : "";
   renderPresets();
   render();
@@ -142,7 +145,7 @@ $("presetSave").addEventListener("click", () => {
 $("presetCancel").addEventListener("click", () => { $("presetAdd").className = "preset-add hidden"; });
 $("presetPick").addEventListener("change", () => {
   const pr = presets().find((x) => x.name === val("presetPick"));
-  if (pr) { $("prompt").value = pr.prompt; save("prompt"); render(); }
+  if (pr) { $("prompt").value = pr.prompt; cfg.presetName = pr.name; save("prompt"); render(); }
 });
 $("presetNew").addEventListener("click", () => { $("presetAdd").className = "preset-add"; });
 $("presetDel").addEventListener("click", () => {
@@ -153,7 +156,11 @@ $("presetDel").addEventListener("click", () => {
   renderPresets();
   status(`Preset "${name}" deleted.`);
 });
-$("prompt").addEventListener("change", () => save("prompt"));
+$("prompt").addEventListener("change", () => {
+  const pr = presets().find((x) => x.prompt === $("prompt").value.trim());
+  cfg.presetName = pr ? pr.name : undefined; // edited by hand: no longer follows a preset
+  save("prompt");
+});
 $("prompt").addEventListener("input", () => render());
 $("prompt").addEventListener("keyup", fitPrompt); // Enter doesn't always fire "input" in UXP
 // click the prompt to edit it; leaving the box shows the scrolling view again
@@ -382,9 +389,8 @@ async function clean() {
   render();
 
   try {
-    let jpeg, maskBytes;
     await modal(async (ctx) => {
-      if (legacy()) return ({ jpeg, mask: maskBytes } = await legacyRead(ctx, doc, job));
+      if (legacy()) return ({ jpeg: job.jpeg, mask: job.mask } = await legacyRead(ctx, doc, job));
       // everything here is rolled back at the end: no history entry, preview layer comes back
       const sid = await ctx.hostControl.suspendHistory({ documentID: doc.id, name: "Comfy Clean read" });
       try {
@@ -395,7 +401,7 @@ async function clean() {
         const pix = await imaging.getPixels({
           documentID: doc.id, sourceBounds: rect, targetSize, componentSize: 8, applyAlpha: true, colorSpace: "RGB", colorProfile: SRGB,
         });
-        jpeg = b64decode(await imaging.encodeImageData({ imageData: pix.imageData, base64: true }));
+        job.jpeg = b64decode(await imaging.encodeImageData({ imageData: pix.imageData, base64: true }));
         pix.imageData.dispose();
         // exact selection at full res: layer mask in Photoshop, and the repaint mask for Flux
         job.sel = await readSelection(doc.id, rect);
@@ -403,9 +409,22 @@ async function clean() {
         await ctx.hostControl.resumeHistory(sid, false);
       }
     });
+  } catch (e) {
+    if (job.cancelled) return removeJob(job);
+    job.state = "error";
+    job.error = e.message || String(e);
+    return render();
+  }
+  await makeResult(job);
+}
 
+// everything after reading the page: also what Retry runs again (job.jpeg / job.mask / job.sel are kept for it)
+async function makeResult(job) {
+  const edit = job.edit;
+  try {
     // selection is captured; now make sure ComfyUI is up (may start it) and build the graph
     await ensureComfy(job);
+    job.sent = true; // from here on, a dead ComfyUI means it was closed mid-job
     if (!objectInfo) await loadModels();
     const wf = models.buildGraph(objectInfo, await loadTemplates(), {
       model: val("model") || load("model"), clip: val("clip") || load("clip") || models.AUTO,
@@ -416,8 +435,8 @@ async function clean() {
 
     job.state = "uploading"; render();
     // template node ids: 4 = image, 20 = mask (clean templates only)
-    wf["4"].inputs.image = await upload(job.base, job.id + ".jpg", jpeg);
-    if (wf["20"]) wf["20"].inputs.image = await upload(job.base, job.id + "_mask.jpg", maskBytes || await maskJpeg(job));
+    wf["4"].inputs.image = await upload(job.base, job.id + ".jpg", job.jpeg);
+    if (wf["20"]) wf["20"].inputs.image = await upload(job.base, job.id + "_mask.jpg", job.mask || await maskJpeg(job));
     if (job.cancelled) throw new Error("Cancelled");
 
     connectWs(job.base);
@@ -430,11 +449,17 @@ async function clean() {
     job.thumb = "data:image/png;base64," + b64encode(png); // the only copy; decoded again for previews
     job.state = "ready";
     job.took = Date.now() - job.time;
+    job.jpeg = job.mask = null; // no Retry for a finished result
     status(`Result ready in ${dur(job.took)}. Click it to preview.`);
   } catch (e) {
     if (job.cancelled) return removeJob(job);
     job.state = "error";
     job.error = e.message || String(e);
+    if (job.sent && !(await reachable(job.base))) { // the raw message would be a bare network error
+      job.error = "ComfyUI was closed while making this result";
+      objectInfo = null;
+      conn(false, "ComfyUI offline");
+    }
   } finally {
     render();
   }
@@ -755,6 +780,13 @@ async function cancelJob(job) {
   if (job.state === "running") await post(job.base, "/interrupt", { prompt_id: job.pid });
 }
 
+// Retry on a failed result: same page area and prompt sent again (ComfyUI is started first if it's off)
+function retryJob(job) {
+  Object.assign(job, { state: "uploading", error: null, sent: false, pid: null, progress: null, sampling: false, sampleStart: 0, queuePos: 0, time: new Date() });
+  render();
+  return makeResult(job);
+}
+
 function removeJob(job) {
   const i = jobs.indexOf(job);
   if (i >= 0) jobs.splice(i, 1);
@@ -1049,7 +1081,12 @@ function render() {
     row.title = job.prompt;
     const bottom = el("div", "bottom");
     if (active) bottom.appendChild(previewActions());
-    else { const pill = pillFor(job); job.pillEl = bottom.appendChild(el("span", "pill " + pill.cls, pill.text)); }
+    else {
+      const pill = pillFor(job), retry = job.state === "error" && job.jpeg; // failed after the page was read
+      const host = retry ? bottom.appendChild(el("div", "acts")) : bottom;
+      if (retry) actButton(host, "primary", "Retry", () => retryJob(job));
+      job.pillEl = host.appendChild(el("span", "pill " + pill.cls, pill.text));
+    }
     txt.appendChild(bottom);
     if (!finished(job)) {
       const bar = el("div", "bar"), fill = el("div");
@@ -1079,15 +1116,15 @@ function render() {
   }
 }
 
+function actButton(acts, cls, text, fn) {
+  const b = el("div", "btn mini " + cls, text);
+  b.addEventListener("click", (e) => { e.stopPropagation(); fn().catch(fail); }); // not the row's click
+  acts.appendChild(b);
+}
 function previewActions() {
   const acts = el("div", "acts");
-  const btn = (cls, text, fn) => {
-    const b = el("div", "btn mini " + cls, text);
-    b.addEventListener("click", (e) => { e.stopPropagation(); fn().catch(fail); }); // not the row's click
-    acts.appendChild(b);
-  };
-  btn("primary", "Apply", applyPreview);
-  btn("ghost", "Discard", () => discardPreview(true));
+  actButton(acts, "primary", "Apply", applyPreview);
+  actButton(acts, "ghost", "Discard", () => discardPreview(true));
   return acts;
 }
 
