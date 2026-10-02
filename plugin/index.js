@@ -488,15 +488,20 @@ async function reachable(base) {
   } catch (e) { return false; }
 }
 
-// ComfyUI closed outside the plugin (its window shut) -> the dot goes offline; started outside -> models load, dot goes live
-let polling = false;
+// ComfyUI closed outside the plugin (its window shut) -> the dot goes offline; started outside -> models load, dot goes live.
+// Acts only when ComfyUI's up/down state changes: loadModels walks the whole models folder on disk, and repeating it
+// every 10 s (ComfyUI up but no usable model, so the dot never turned green) made Photoshop stutter.
+let polling = false, wasUp = null;
 setInterval(async () => {
   if (starting || polling || !cfgReady) return;
   polling = true;
   try {
     const up = await reachable(baseUrl()), shown = $("dot").className === "dot ok";
-    if (shown && !up) { objectInfo = null; conn(false, "ComfyUI offline"); }
-    else if (!shown && up) await loadModels().catch(() => {});
+    const changed = up !== wasUp;
+    wasUp = up;
+    if (!changed || up === shown) return;
+    if (!up) { objectInfo = null; conn(false, "ComfyUI offline"); }
+    else await loadModels().catch(() => {});
   } finally { polling = false; }
 }, 10000);
 
