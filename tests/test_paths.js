@@ -60,7 +60,7 @@ async function run(withImaging) {
   const m = new Module(PLUGIN);
   m.filename = PLUGIN;
   m.paths = Module._nodeModulePaths(path.dirname(PLUGIN));
-  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;module.exports = { clean, autoPreview, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, shown: () => preview, needs: () => needs };", PLUGIN);
+  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;module.exports = { clean, autoPreview, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, fadeEdges, shown: () => preview, needs: () => needs };", PLUGIN);
   Module._load = load;
   const P = m.exports;
   assert.strictEqual(P.legacy(), !withImaging, "legacy() picks the path from the Imaging API");
@@ -80,6 +80,13 @@ async function run(withImaging) {
   assert.strictEqual(P.timing({ time: new Date(now - 75000), state: "running", progress: "2/4", sampleStart: now - 10000, tick: now }),
     " · 1m 15s · ~10s left");
   assert.ok(!/left/.test(P.timing({ time: new Date(now), state: "running", progress: "4/4", sampleStart: now - 9, tick: now })), "no estimate once sampling is done");
+
+  // Edit: top and bottom rows fade in (h 100 -> 5px ramp), the middle and the original selection stay untouched
+  const sel = new Uint8Array(2 * 100).fill(255), faded = P.fadeEdges(sel, 2, 100);
+  const col = (y) => faded[y * 2];
+  assert.ok(col(0) > 0 && col(0) < col(1) && col(4) < 255 && col(5) === 255 && col(50) === 255, "ramp: " + [0, 1, 4, 5].map(col));
+  assert.ok(col(99) === col(0) && col(95) === col(4) && col(94) === 255, "bottom mirrors top");
+  assert.strictEqual(sel[0], 255, "job.sel itself is not changed");
 
   await P.clean().catch((e) => { throw new Error("clean threw: " + e.stack); });
   const job = P.jobs[0];

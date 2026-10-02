@@ -621,6 +621,17 @@ async function readSelection(docId, rect) {
   return out;
 }
 
+// Edit: the result's top and bottom rows fade into the original, so a slight color shift doesn't show as a hard line.
+// ponytail: fixed ramp (h/20, at most 24px), not on the Photoshop 2022 path (selection comes from a channel there)
+function fadeEdges(sel, w, h) {
+  const f = Math.min(24, Math.floor(h / 20)), out = sel.slice();
+  for (let i = 0; i < f; i++) {
+    const t = (i + 1) / (f + 1), k = t * t * (3 - 2 * t); // smoothstep
+    for (const y of [i, h - 1 - i]) for (let x = 0; x < w; x++) out[y * w + x] = Math.round(out[y * w + x] * k);
+  }
+  return out;
+}
+
 async function maskJpeg(job) {
   const rgb = new Uint8Array(job.sel.length * 3);
   for (let i = 0; i < job.sel.length; i++) rgb[i * 3] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = job.sel[i];
@@ -765,7 +776,7 @@ async function placePreview(job) {
       // the exact original selection
       if (old) await play([loadChannel(job.chan)]);
       else {
-        const m = await imaging.createImageDataFromBuffer(job.sel, { width: job.w, height: job.h, components: 1, chunky: true, colorSpace: "Grayscale" });
+        const m = await imaging.createImageDataFromBuffer(job.edit ? fadeEdges(job.sel, job.w, job.h) : job.sel, { width: job.w, height: job.h, components: 1, chunky: true, colorSpace: "Grayscale" });
         await imaging.putSelection({ documentID: doc.id, imageData: m, replace: true, targetBounds: { left: job.rect.left, top: job.rect.top } });
         m.dispose();
       }
