@@ -29,6 +29,8 @@
       --line: rgba(0, 0, 0, 0.10);
       --accent-soft: rgba(75, 142, 245, 0.13);
     }
+    .icon .dark-only { display: none; }
+    .icon .light-only { display: block; }
   }
 
   html, body { height: 100%; margin: 0; padding: 0; }
@@ -65,6 +67,12 @@
   .dot.off { background: var(--err); }
   .icon { width: 26px; height: 26px; margin-left: 6px; border-radius: 13px; text-align: center; line-height: 26px; font-size: 15px; color: var(--muted); }
   .icon:hover { background: var(--card-hover); color: var(--text); }
+  /* SVG icons, not text glyphs: the gear came out as an emoji and the arrow sat below the title. One image per theme
+     (an <img> can't take the text color) */
+  .icon { display: flex; align-items: center; justify-content: center; }
+  .icon img { width: 16px; height: 16px; opacity: 0.85; }
+  .icon:hover img { opacity: 1; }
+  .light-only { display: none; }
 
   /* blocks */
   .card { padding: 10px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
@@ -166,7 +174,7 @@
   /* settings */
   .page-head { display: flex; align-items: center; padding-bottom: 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
   .page-head .icon { margin: 0 6px 0 0; }
-  .page-title { font-size: 14px; font-weight: bold; }
+  .page-title { height: 26px; line-height: 26px; font-size: 14px; font-weight: bold; }
   .group { margin-top: 12px; }
   .field { margin-top: 8px; }
   .field .k { margin-bottom: 4px; font-size: 11px; color: var(--muted); }
@@ -191,7 +199,7 @@
       <div class="tagline">AI clean &amp; edit for manhwa, powered by ComfyUI</div>
     </div>
     <div class="conn"><div class="dot" id="dot"></div><span id="connText">Connecting...</span></div>
-    <div class="icon" id="gear" title="Settings">&#9881;</div>
+    <div class="icon" id="gear" title="Settings"><img class="dark-only" src="icons/gear.svg"><img class="light-only" src="icons/gear-light.svg"></div>
   </header>
 
   <div id="mainView">
@@ -245,7 +253,7 @@
   </div>
 
   <div id="settingsView" class="hidden">
-    <div class="page-head"><div class="icon" id="back" title="Back">&#8592;</div><div class="page-title">Settings</div></div>
+    <div class="page-head"><div class="icon" id="back" title="Back"><img class="dark-only" src="icons/back.svg"><img class="light-only" src="icons/back-light.svg"></div><div class="page-title">Settings</div></div>
 
     <div class="group card">
       <div class="label">GENERATION</div>
@@ -264,6 +272,11 @@
         <div class="field"><div class="k">Color match (0-1, Clean only)</div><sp-textfield id="colorMatch" type="number" value="1"></sp-textfield></div>
         <div class="sp"></div>
         <div class="field"><div class="k">Auto-retry after (s/step, 0 = off)</div><sp-textfield id="stuck" type="number" value="30"></sp-textfield></div>
+      </div>
+      <div class="pair">
+        <div class="field"><div class="k">Edit fade (% of height, 0 = off)</div><sp-textfield id="fade" type="number" value="7"></sp-textfield></div>
+        <div class="sp"></div>
+        <div class="field"></div>
       </div>
     </div>
 

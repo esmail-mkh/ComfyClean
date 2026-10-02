@@ -82,11 +82,13 @@ async function run(withImaging) {
   assert.ok(!/left/.test(P.timing({ time: new Date(now), state: "running", progress: "4/4", sampleStart: now - 9, tick: now })), "no estimate once sampling is done");
 
   // Edit: top and bottom rows fade in (h 100 -> 7px ramp), the middle and the original selection stay untouched
-  const sel = new Uint8Array(2 * 100).fill(255), faded = P.fadeEdges(sel, 2, 100);
+  const sel = new Uint8Array(2 * 100).fill(255), faded = P.fadeEdges(sel, 2, 100, 7);
   const col = (y) => faded[y * 2];
   assert.ok(col(0) > 0 && col(0) < col(1) && col(6) < 255 && col(7) === 255 && col(50) === 255, "ramp: " + [0, 1, 6, 7].map(col));
   assert.ok(col(99) === col(0) && col(93) === col(6) && col(92) === 255, "bottom mirrors top");
   assert.strictEqual(sel[0], 255, "job.sel itself is not changed");
+  assert.deepStrictEqual(P.fadeEdges(sel, 2, 100, 0), sel, "0 = off");
+  assert.ok(P.fadeEdges(sel, 2, 100, 15)[14 * 2] < 255 && P.fadeEdges(sel, 2, 100, 15)[15 * 2] === 255, "15% -> 15px ramp");
 
   await P.clean().catch((e) => { throw new Error("clean threw: " + e.stack); });
   const job = P.jobs[0];
