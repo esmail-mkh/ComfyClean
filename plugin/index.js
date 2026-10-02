@@ -149,6 +149,7 @@ $("presetDel").addEventListener("click", () => {
 });
 $("prompt").addEventListener("change", () => save("prompt"));
 $("prompt").addEventListener("input", () => render());
+$("prompt").addEventListener("keyup", fitPrompt); // Enter doesn't always fire "input" in UXP
 for (const b of document.querySelectorAll("#modeSeg div")) {
   b.addEventListener("click", () => { $("mode").value = b.dataset.v; save("mode"); render(); });
 }
@@ -901,7 +902,24 @@ function tick() {
   if (!live.length) { clearInterval(ticker); ticker = null; }
 }
 
+// UXP's textarea can't be scrolled: it grows to fit the whole prompt instead (the page scrolls if it gets long).
+// ponytail: word wrap simulated with an average glyph width (~5.3px measured in Photoshop, 5.5 to stay safe), not measured text
+function fitPrompt() {
+  const t = $("prompt"), per = Math.max(10, Math.floor(((t.offsetWidth || 0) - 12 || 280) / 5.5));
+  let lines = 0;
+  for (const para of t.value.split(/\r\n|\r|\n/)) { // the Windows textarea may give \r alone
+    let cur = 0;
+    lines++;
+    for (const w of para.split(" ")) {
+      if (cur && cur + 1 + w.length > per) { lines++; cur = w.length; } else cur += (cur ? 1 : 0) + w.length;
+    }
+  }
+  t.style.height = Math.max(64, lines * 15 + 16) + "px"; // ~14.5px lines + padding
+}
+window.addEventListener("resize", fitPrompt); // panel width changes the wrapping
+
 function render() {
+  fitPrompt();
   if (!ticker && jobs.some((j) => !finished(j))) ticker = setInterval(tick, 1000);
   const edit = $("mode").value === "edit";
   for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === $("mode").value ? "on" : "";

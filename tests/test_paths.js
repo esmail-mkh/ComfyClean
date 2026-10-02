@@ -31,6 +31,7 @@ function fakeEl() {
 
 async function run(withImaging) {
   const els = {};
+  global.window = { addEventListener() {} };
   global.document = { getElementById: (id) => (els[id] = els[id] || fakeEl()), createElement: fakeEl, querySelectorAll: () => [], body: {} };
   global.fetch = () => Promise.reject(new Error("offline"));
   // a 100x200 document with a selection at 10,20 - 50,60
