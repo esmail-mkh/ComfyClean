@@ -221,9 +221,15 @@ function modelPicked() {
 }
 const fillChecks = () => { $("legacy").checked = !!cfg.legacy; $("autoPreview").checked = cfg.autoPreview !== false; }; // auto preview: on unless turned off
 
-// Settings save themselves. Written to settings.json, then "Saved." shows under the fields.
+// Settings save themselves. Written to settings.json, then "Saved" shows in the footer for a moment (flashSaved).
 // An empty picker is never written (ComfyUI off and no models listed): it would blank the saved model / encoder / VAE.
-const persist = () => (!cfgReady ? Promise.resolve() : writeCfg().then(() => { $("saveMsg").textContent = "Saved."; })
+let savedTimer;
+function flashSaved() {
+  $("savedTag").className = "saved";
+  clearTimeout(savedTimer);
+  savedTimer = setTimeout(() => { $("savedTag").className = "saved hidden"; }, 1800);
+}
+const persist = () => (!cfgReady ? Promise.resolve() : writeCfg().then(() => { $("saveMsg").textContent = ""; flashSaved(); })
   .catch((e) => { $("saveMsg").textContent = e.message || String(e); }));
 function keep(f) {
   if (!PICKERS.has(f) || val(f)) cfg[f] = val(f);

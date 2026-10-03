@@ -255,8 +255,14 @@
   .about .meta { margin-top: 2px; font-size: 10px; color: var(--muted); }
 
   /* flex, not text-align: UXP centers text + <b> wrongly, pushing the credit past the panel edge */
-  footer { flex: none; display: flex; justify-content: center; align-items: center; height: 30px; white-space: nowrap; border-top: 1px solid var(--line); font-size: 10px; color: var(--faint); }
+  footer { position: relative; flex: none; display: flex; justify-content: center; align-items: center; height: 30px; white-space: nowrap; border-top: 1px solid var(--line); font-size: 10px; color: var(--faint); }
   footer #version { margin-left: 4px; }
+  /* "Saved" after a setting is written: in the footer, which stays in view (the Settings page scrolls, and its own
+     status line sat below the last card, out of sight) */
+  .saved { position: absolute; left: 12px; top: 0; display: flex; align-items: center; height: 30px; }
+  .saved.hidden { display: none; }
+  .saved .ic { margin-right: 4px; }
+  .saved span { height: 30px; line-height: 30px; font-size: 10px; font-weight: bold; color: var(--ok); }
   footer b, .credit { margin-left: 4px; color: var(--text); font-weight: bold; }
 </style>
 </head>
@@ -395,7 +401,7 @@
     </div>
   </div>
 
-  <footer>Comfy Clean<span id="version"></span>&nbsp;&middot; designed by<b>E.MKH</b></footer>
+  <footer><div class="saved hidden" id="savedTag"><img class="ic" src="icons/check-ok.svg"><span>Saved</span></div>Comfy Clean<span id="version"></span>&nbsp;&middot; designed by<b>E.MKH</b></footer>
 </div>
 <script src="index.js"></script>
 </body>

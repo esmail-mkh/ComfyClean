@@ -90,7 +90,7 @@ async function run(withImaging) {
   await sleep(0);
   els.pad.value = "50"; await els.pad.fire("change");
   assert.strictEqual(saved().pad, "50", "a changed field is saved by itself");
-  assert.strictEqual(els.saveMsg.textContent, "Saved.", "and says so");
+  assert.strictEqual(els.savedTag.className, "saved", "and says so in the footer, which is always in view");
   els.legacy.checked = true; await els.legacy.fire("change");
   assert.strictEqual(saved().legacy, true, "a checkbox too");
   await els.model.fire("change"); await els.clip.fire("change");
