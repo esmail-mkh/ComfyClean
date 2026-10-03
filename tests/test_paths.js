@@ -44,6 +44,8 @@ async function run(withImaging) {
   let onEvent = null; // Photoshop's notification listener (document switched / closed)
   const sent = []; // every batchPlay command, newest last
   let layerGone = false; // the preview layer was undone / deleted in Photoshop
+  let inModal = 0; // executeAsModal scopes open right now
+  let readsNeedModal = false, readsBroken = false; // the Imaging API refuses to read the selection outside a modal scope / always
   let fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; // the document's selection (null = none)
   let selFill = (n) => new Uint8Array(n); // its pixels: all 0 unless a test says otherwise
   const batchPlay = async (cmds) => sent.push(...cmds) && cmds.map((c) => (c._obj === "get" && c._target[0]._property === "selection"
@@ -51,10 +53,11 @@ async function run(withImaging) {
     : layerGone && c._obj === "get" && c._target[0]._property === "layerID" ? { _obj: "error", message: "The object is not currently available.", result: -25920 }
     : anything()));
   const getSelection = async ({ sourceBounds: b }) => {
+    if (readsBroken || (readsNeedModal && !inModal)) throw new Error("imaging.getSelection: not allowed here");
     const w = b.right - b.left, h = b.bottom - b.top;
     return { sourceBounds: b, imageData: { width: w, height: h, getData: async () => selFill(w * h), dispose() {} } };
   };
-  const ps = { app, core: { executeAsModal: (fn) => fn(anything()) }, action: { batchPlay, addNotificationListener: (evs, fn) => { onEvent = fn; } }, constants: anything(),
+  const ps = { app, core: { executeAsModal: async (fn) => { inModal++; try { return await fn(anything()); } finally { inModal--; } } }, action: { batchPlay, addNotificationListener: (evs, fn) => { onEvent = fn; } }, constants: anything(),
     imaging: withImaging ? withOverrides(anything(), { encodeImageData: async () => "AAAA", getSelection }) : undefined };
   // plugin folder = the real one, so the real workflow templates are read
   const realFolder = (dir) => ({ getEntry: async (name) => {
@@ -180,6 +183,16 @@ async function run(withImaging) {
   selFill = halfFilled;
   assert.strictEqual(await P.detectMode(doc, box), withImaging ? "edit" : "clean", "full width but not a box: an Edit (2022 path can't read pixels: width decides)");
   selFill = filled;
+  if (withImaging) { // reading the selection's pixels outside a modal scope may be refused: it is tried inside one, and if both fail the width decides
+    readsNeedModal = true;
+    assert.strictEqual(await P.detectMode(doc, box), "clean", "reads refused outside a modal scope: the box is still found");
+    selFill = halfFilled;
+    assert.strictEqual(await P.detectMode(doc, box), "edit", "(and its pixels were really read inside the modal scope)");
+    selFill = filled; readsNeedModal = false;
+    readsBroken = true;
+    assert.strictEqual(await P.detectMode(doc, box), "clean", "reads refused everywhere: a full-width selection is a Clean, not 'undecided'");
+    readsBroken = false;
+  }
   els.mode.value = "auto";
   fakeSel = box; await P.refreshAuto();
   assert.strictEqual(P.detected(), "clean", "the panel follows the selection");
@@ -187,6 +200,7 @@ async function run(withImaging) {
   fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; await P.refreshAuto();
   assert.strictEqual(P.detected(), "edit", "a new selection is looked at again");
   assert.deepStrictEqual([els.goText.textContent, els.autoText.textContent], ["Edit selection", "Auto: Edit"]);
+  assert.ok(/covers 40% of the width/.test(els.modeHint.textContent), "the hint says why: " + els.modeHint.textContent);
   fakeSel = null; await P.refreshAuto();
   assert.deepStrictEqual([P.detected(), els.goText.textContent, els.autoText.textContent], [null, "Clean / Edit selection", "Auto"], "no selection: neutral");
   const jobsBefore = P.jobs.length;

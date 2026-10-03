@@ -191,19 +191,33 @@ let detected = null; // "clean" | "edit" | null (no selection yet), what auto mo
 let detectKey = ""; // document + selection last looked at: the pixels are read again only when it changes
 let detecting = false;
 const isEdit = () => $("mode").value === "edit" || ($("mode").value === "auto" && detected === "edit");
+let detectWhy = ""; // the reason for the last answer, shown in the hint
 async function detectMode(doc, sel) {
   const tol = Math.max(2, doc.width * 0.01);
-  if (sel.left > tol || sel.right < doc.width - tol) return "edit";
-  if (legacy()) return "clean"; // Photoshop 2022 path: the pixels aren't read here, the width alone decides
-  const px = await readSelection(doc.id, clampRect(sel, doc));
+  if (sel.left > tol || sel.right < doc.width - tol) {
+    detectWhy = `selection covers ${Math.round(100 * (sel.right - sel.left) / doc.width)}% of the width`;
+    return "edit";
+  }
+  if (legacy()) { detectWhy = "full-width selection"; return "clean"; } // Photoshop 2022 path: the pixels aren't read here, the width alone decides
+  const rect = clampRect(sel, doc);
+  let px = null;
+  // The Imaging API's reads may need a modal scope (every other read in this file runs in one): try without, then with.
+  // Without the pixels (both refused) a full-width selection counts as a box: better than staying undecided.
+  try { px = await readSelection(doc.id, rect); } catch (e) {
+    try { px = await modal(() => readSelection(doc.id, rect), "Comfy Clean selection"); } catch (e2) { px = null; }
+  }
+  if (!px) { detectWhy = "full-width selection"; return "clean"; }
   let on = 0;
   for (const v of px) if (v >= 128) on++;
-  return on >= px.length * 0.97 ? "clean" : "edit"; // 97%: a feathered edge isn't a different shape
+  if (on >= px.length * 0.97) { detectWhy = "a box across the full width"; return "clean"; } // 97%: a feathered edge isn't a different shape
+  detectWhy = `full width, but only ${Math.round(100 * on / px.length)}% filled`;
+  return "edit";
 }
 async function refreshAuto() {
   // not while a page is being read or a preview placed: the selection is being moved around then
   if (!panelShown || detecting || placing || !cfgReady || $("mode").value !== "auto" || jobs.some((j) => j.state === "reading")) return;
   detecting = true;
+  const unstick = setTimeout(() => { detecting = false; detectKey = ""; }, 4000); // a Photoshop call that never returns must not block every later look
   try {
     const doc = app.activeDocument, sel = doc && await selectionBounds(doc);
     const key = sel ? [doc.id, sel.left, sel.top, sel.right, sel.bottom].join() : "none";
@@ -211,7 +225,7 @@ async function refreshAuto() {
     detectKey = key;
     const d = sel ? await detectMode(doc, sel) : null;
     if (d !== detected) { detected = d; render(); }
-  } catch (e) { detectKey = ""; } finally { detecting = false; } // no document, Photoshop busy: look again next time
+  } catch (e) { detectKey = ""; } finally { clearTimeout(unstick); detecting = false; } // no document, Photoshop busy: look again next time
 }
 setInterval(refreshAuto, 600);
 for (const b of document.querySelectorAll("#modeSeg div")) {
@@ -1177,9 +1191,7 @@ function render() {
   for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === mode ? "on" : "";
   $("autoText").textContent = auto && detected ? "Auto: " + (edit ? "Edit" : "Clean") : "Auto";
   $("modeHint").textContent = auto
-    ? (detected === "edit" ? "Auto: Edit, the selection doesn't fill the page width."
-      : detected === "clean" ? "Auto: Clean, a box across the full page width."
-      : "Auto: full-width box = Clean, anything else = Edit.")
+    ? (detected ? `Auto: ${edit ? "Edit" : "Clean"}, ${detectWhy}.` : "Auto: full-width box = Clean, anything else = Edit.")
     : edit ? "Regenerates the whole selection from the prompt."
     : "Selection is the mask. A full-width strip around it is sent as context.";
   // not #go itself: its textContent would delete the icon
