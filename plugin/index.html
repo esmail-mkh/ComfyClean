@@ -20,6 +20,12 @@
     --err: #ef5f67;
     --err-soft: rgba(239, 95, 103, 0.15);
   }
+  /* small SVG icons (.ic) next to text: one image per theme (dk / lt) and a white one (wh) for the accent background.
+     Fills only, like the gear. This base comes BEFORE the light-theme block below: same specificity, the later rule wins.
+     They sit only in markup render() never rebuilds: a rebuilt <img> blinks empty while it decodes */
+  .ic { display: block; flex: none; width: 14px; height: 14px; }
+  .ic.lt, .ic.wh { display: none; }
+  .ic.big { width: 24px; height: 24px; margin: 0 auto 8px; opacity: 0.6; }
   @media (prefers-color-scheme: light), (prefers-color-scheme: lightest) {
     :root {
       --muted: rgba(0, 0, 0, 0.55);
@@ -31,6 +37,8 @@
     }
     .icon .dark-only { display: none; }
     .icon .light-only { display: block; }
+    .ic.dk { display: none; }
+    .ic.lt { display: block; }
   }
 
   html, body { height: 100%; margin: 0; padding: 0; }
@@ -80,9 +88,15 @@
   .section { margin-top: 14px; }
 
   .seg { display: flex; padding: 3px; border-radius: 9px; background: var(--card); border: 1px solid var(--line); }
-  .seg div { flex: 1; text-align: center; height: 28px; line-height: 28px; border-radius: 6px; color: var(--muted); font-weight: bold; }
-  .seg div:hover { color: var(--text); }
-  .seg div.on { color: #fff; background: var(--accent); background-image: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .seg div { flex: 1; display: flex; align-items: center; justify-content: center; height: 28px; border-radius: 6px; }
+  .seg span { height: 28px; line-height: 28px; font-weight: bold; white-space: nowrap; color: var(--muted); }
+  .seg .ic { margin-right: 6px; }
+  .seg div:hover span { color: var(--text); }
+  .seg div.on { background: var(--accent); background-image: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .seg div.on span { color: #fff; }
+  .seg div.on .ic.dk, .seg div.on .ic.lt { display: none; }
+  .seg div.on .ic.wh { display: block; }
+  .seg img, .seg span { cursor: pointer; }
   .hint { margin: 7px 2px 0; font-size: 11px; color: var(--muted); }
   .hint.err { color: var(--err); }
   /* custom nodes to install (Settings) */
@@ -100,8 +114,9 @@
   .chip.add { color: var(--muted); border-style: dashed; }
   .preset-row { display: flex; align-items: center; }
   .preset-row sp-picker { flex: 1; width: auto; }
-  .icon-btn { flex: none; width: 30px; height: 30px; line-height: 28px; margin-left: 6px; border-radius: 8px; text-align: center; font-size: 16px;
+  .icon-btn { flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin-left: 6px; border-radius: 8px;
               color: var(--muted); background: var(--card-hover); border: 1px solid var(--line); }
+  .icon-btn img { cursor: pointer; }
   .icon-btn:hover { color: var(--text); border-color: var(--muted); }
   .icon-btn.danger:hover { color: var(--err); border-color: var(--err); }
   .preset-add { margin-top: 8px; padding: 8px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
@@ -136,7 +151,10 @@
   .btn { height: 32px; line-height: 32px; border-radius: 9px; text-align: center; font-weight: bold; letter-spacing: 0.3px; }
   .btn.primary { color: #fff; background: var(--accent); background-image: linear-gradient(135deg, var(--accent), var(--accent-2)); }
   .btn.primary:hover { background-image: linear-gradient(135deg, #5d9bf7, #9a80f3); }
-  .btn.primary.big { height: 38px; line-height: 38px; font-size: 13px; }
+  .btn.primary.big { display: flex; align-items: center; justify-content: center; height: 38px; line-height: 38px; font-size: 13px; }
+  .btn .ic.wh { display: block; margin-right: 7px; }
+  .btn.primary span { height: 38px; line-height: 38px; font-size: 13px; font-weight: bold; letter-spacing: 0.3px; color: #fff; white-space: nowrap; }
+  .btn.primary img, .btn.primary span { cursor: pointer; }
   .btn.ghost { color: var(--text); background: var(--card-hover); border: 1px solid var(--line); }
   .btn.ghost:hover { border-color: var(--muted); }
   /* Apply / Discard on the previewed result's row */
@@ -158,8 +176,11 @@
   .filters div { height: 18px; line-height: 18px; padding: 0 8px; border-radius: 5px; font-size: 10px; color: var(--muted); }
   .filters div:hover { color: var(--text); }
   .filters div.on { background: var(--card-hover); color: var(--text); font-weight: bold; }
-  .link { margin-left: 8px; height: 22px; line-height: 22px; font-size: 10px; color: var(--muted); }
-  .link:hover { color: var(--err); }
+  .link { display: flex; align-items: center; margin-left: 8px; height: 22px; }
+  .link .ic { margin-right: 4px; }
+  .link span { height: 22px; line-height: 22px; font-size: 10px; color: var(--muted); }
+  .link:hover span { color: var(--err); }
+  .link img, .link span { cursor: pointer; }
   .stats { margin: -2px 0 7px; font-size: 10px; color: var(--faint); }
 
   .empty { padding: 18px 12px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 11px; }
@@ -222,8 +243,8 @@
 
   <div id="mainView">
     <div class="seg" id="modeSeg">
-      <div data-v="clean">Clean</div>
-      <div data-v="edit">Edit</div>
+      <div data-v="clean"><img class="ic dk" src="icons/eraser.svg"><img class="ic lt" src="icons/eraser-light.svg"><img class="ic wh" src="icons/eraser-white.svg"><span>Clean</span></div>
+      <div data-v="edit"><img class="ic dk" src="icons/pencil.svg"><img class="ic lt" src="icons/pencil-light.svg"><img class="ic wh" src="icons/pencil-white.svg"><span>Edit</span></div>
     </div>
     <input id="mode" class="hidden" value="clean">
     <div class="hint" id="modeHint"></div>
@@ -232,8 +253,8 @@
       <div class="label">PROMPT</div>
       <div class="preset-row">
         <sp-picker id="presetPick" size="m" placeholder="Custom prompt"><sp-menu slot="options"></sp-menu></sp-picker>
-        <div class="icon-btn" id="presetNew" title="Save the current prompt as a new preset">+</div>
-        <div class="icon-btn danger" id="presetDel" title="Delete the selected preset">&minus;</div>
+        <div class="icon-btn" id="presetNew" title="Save the current prompt as a new preset"><img class="ic dk" src="icons/plus.svg"><img class="ic lt" src="icons/plus-light.svg"></div>
+        <div class="icon-btn danger" id="presetDel" title="Delete the selected preset"><img class="ic dk" src="icons/minus.svg"><img class="ic lt" src="icons/minus-light.svg"></div>
       </div>
       <div id="presetAdd" class="preset-add hidden">
         <sp-textfield id="presetName" placeholder="Preset name"></sp-textfield>
@@ -252,7 +273,7 @@
       <sp-picker id="modelQuick" size="s" quiet placeholder="Start ComfyUI to list models"><sp-menu slot="options"></sp-menu></sp-picker>
     </div>
     <div class="go go-row">
-      <div class="btn primary big" id="go">Clean selection</div>
+      <div class="btn primary big" id="go"><img class="ic wh" src="icons/sparkle-white.svg"><span id="goText">Clean selection</span></div>
       <div class="filters" id="varSeg" title="Results to make per click"><div data-v="1">1</div><div data-v="2">2</div><div data-v="3">3</div><div data-v="4">4</div></div>
       <input id="variations" class="hidden" value="1">
     </div>
@@ -269,7 +290,7 @@
           <div data-f="new">New</div>
           <div data-f="applied">Applied</div>
         </div>
-        <div class="link" id="clearDone" title="Remove finished results from the list">Clear</div>
+        <div class="link" id="clearDone" title="Remove finished results from the list"><img class="ic dk" src="icons/trash.svg"><img class="ic lt" src="icons/trash-light.svg"><span>Clear</span></div>
       </div>
       <div class="stats" id="sessionStats"></div>
       <div id="jobs"></div>

@@ -995,6 +995,9 @@ function syncPresetPick() {
 
 const finished = (j) => j.state === "ready" || j.state === "error";
 
+// the empty list's picture: two <img> (dark / light theme) made once and moved into each new empty row, like the thumbnails
+const emptyIcons = [["dk", "picture"], ["lt", "picture-light"]].map(([cls, file]) => { const i = el("img", "ic big " + cls); i.src = `icons/${file}.svg`; return i; });
+
 // render() rebuilds the list (documents switched, jobs added or finished); a fresh <img> decodes the 1-3 MB PNG again and blinks empty
 // meanwhile, so each result keeps one <img> that is just moved into the new row
 const thumbs = new WeakMap();
@@ -1089,7 +1092,7 @@ function render() {
   $("modeHint").textContent = edit
     ? "Regenerates the whole selection from the prompt."
     : "Selection is the mask. A full-width strip around it is sent as context.";
-  $("go").textContent = (edit ? "Edit selection" : "Clean selection");
+  $("goText").textContent = (edit ? "Edit selection" : "Clean selection"); // not #go itself: its textContent would delete the icon
   for (const b of document.querySelectorAll("#varSeg div")) b.className = b.dataset.v === String(variations()) ? "on" : "";
   // the model the next job will use: the Settings pick, or the saved one while ComfyUI is offline/starting
   const model = val("model") || load("model") || "";
@@ -1111,7 +1114,9 @@ function render() {
   const box = $("jobs");
   box.innerHTML = "";
   if (!shown.length) {
-    box.appendChild(el("div", "empty", docId === null ? "Open a document to see its results."
+    const empty = box.appendChild(el("div", "empty"));
+    for (const i of emptyIcons) empty.appendChild(i);
+    empty.appendChild(el("div", "", docId === null ? "Open a document to see its results."
       : mine.length ? "Nothing here with this filter." : "Results of this page appear here."));
   }
   for (const job of shown) {

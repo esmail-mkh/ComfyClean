@@ -182,6 +182,20 @@ for (const [, id] of fs.readFileSync(PLUGIN, "utf8").matchAll(/\$\("([\w-]+)"\)/
   assert.ok(html.includes(`id="${id}"`), `index.js uses #${id}, missing in index.html`);
 }
 
+// every icon file used in the markup must exist (a typo only shows as a missing picture in Photoshop), and so must the
+// two the empty list builds in index.js
+const iconFiles = [...html.matchAll(/src="(icons\/[\w@.-]+)"/g)].map((m) => m[1]).concat(["icons/picture.svg", "icons/picture-light.svg"]);
+for (const f of iconFiles) assert.ok(fs.existsSync(path.join(__dirname, "../plugin", f)), `missing icon file ${f}`);
+assert.ok(iconFiles.length > 20, "icons found in index.html: " + iconFiles.length);
+// the base rule that hides the light-theme icons must come BEFORE the light-theme media block (same specificity, the later
+// rule wins): the other way round the light icons never showed, and dark-theme screenshots can't tell
+assert.ok(html.indexOf(".ic.lt, .ic.wh {") > 0 && html.indexOf(".ic.lt, .ic.wh {") < html.indexOf("@media (prefers-color-scheme: light)"), "icon base rules go before the light-theme block");
+// textContent on an element deletes everything inside it: no icon may sit in one (the main button's text is its own span)
+for (const [, id] of fs.readFileSync(PLUGIN, "utf8").matchAll(/\$\("([\w-]+)"\)\.textContent\s*=/g)) {
+  const at = html.indexOf(`id="${id}"`), after = html.slice(html.indexOf(">", at) + 1);
+  assert.ok(!/<img/.test(after.slice(0, after.indexOf("</"))), `#${id} gets textContent from index.js but holds an <img>: it would be deleted`);
+}
+
 (async () => {
   await run(true);
   await run(false);
