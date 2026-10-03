@@ -84,7 +84,9 @@
 
   /* blocks */
   .card { padding: 10px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
-  .label { margin: 0 0 7px; height: 12px; line-height: 12px; font-size: 10px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+  .label { display: flex; align-items: center; margin: 0 0 7px; height: 12px; }
+  .label span { height: 12px; line-height: 12px; font-size: 10px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+  .label .ic { width: 12px; height: 12px; margin-right: 6px; }
   .section { margin-top: 14px; }
 
   .seg { display: flex; padding: 3px; border-radius: 9px; background: var(--card); border: 1px solid var(--line); }
@@ -121,7 +123,7 @@
   .icon-btn.danger:hover { color: var(--err); border-color: var(--err); }
   .preset-add { margin-top: 8px; padding: 8px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
   .preset-add .row { margin-top: 6px; }
-  .preset-add sp-button { flex: 1; }
+  .preset-add .btn { flex: 1; }
   /* UXP's textarea (and sp-textarea) can't scroll: text past its bottom is just hidden. So the prompt is shown in a
      scrolling box and the textarea only appears while typing, as tall as its text (fitPrompt). It also stops typing
      at 256 characters without maxlength. */
@@ -137,10 +139,14 @@
   .prompt-view .ph { color: var(--faint); }
   textarea { display: block; width: 100%; height: 110px; min-height: 110px; margin: 9px 0 0; } /* UXP gave it a left margin: 7px further right than the view */
   sp-textfield, sp-picker { width: 100%; }
-  sp-button { width: 100%; }
+  .btn.std { display: flex; align-items: center; justify-content: center; height: 32px; line-height: 32px; padding: 0 12px; }
+  .btn.std span { height: 32px; line-height: 32px; font-size: 12px; font-weight: bold; letter-spacing: 0.3px; white-space: nowrap; }
+  .btn.std .ic { margin-right: 6px; }
+  .btn.std img, .btn.std span { cursor: pointer; }
 
   .go { margin-top: 10px; }
   .model-line { display: flex; align-items: center; height: 28px; margin-top: 10px; padding: 0 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
+  .model-line .ic { margin-right: 7px; }
   .model-line .k { flex: none; height: 28px; line-height: 28px; margin-right: 8px; font-size: 9px; font-weight: bold; letter-spacing: 1px; color: var(--faint); }
   .model-line sp-picker { flex: 1; width: auto; min-width: 0; }
   /* variants picker sits beside the main button: no extra row, so the panel keeps its height (a taller one got a scrollbar) */
@@ -153,29 +159,47 @@
   .btn.primary:hover { background-image: linear-gradient(135deg, #5d9bf7, #9a80f3); }
   .btn.primary.big { display: flex; align-items: center; justify-content: center; height: 38px; line-height: 38px; font-size: 13px; }
   .btn .ic.wh { display: block; margin-right: 7px; }
-  .btn.primary span { height: 38px; line-height: 38px; font-size: 13px; font-weight: bold; letter-spacing: 0.3px; color: #fff; white-space: nowrap; }
+  .btn.primary span { color: #fff; }
+  .btn.ghost span { color: var(--text); }
+  .btn.primary.big span { height: 38px; line-height: 38px; font-size: 13px; font-weight: bold; letter-spacing: 0.3px; white-space: nowrap; }
   .btn.primary img, .btn.primary span { cursor: pointer; }
   .btn.ghost { color: var(--text); background: var(--card-hover); border: 1px solid var(--line); }
   .btn.ghost:hover { border-color: var(--muted); }
   /* Apply / Discard on the previewed result's row */
   .acts { display: flex; margin-top: 1px; }
-  .btn.mini { height: 22px; line-height: 22px; padding: 0 12px; margin-right: 6px; border-radius: 6px; font-size: 11px; letter-spacing: 0; }
+  .btn.mini { display: flex; align-items: center; height: 22px; line-height: 22px; padding: 0 10px; margin-right: 6px; border-radius: 6px; font-size: 11px; letter-spacing: 0; }
+  .btn.mini span { height: 22px; line-height: 22px; font-size: 11px; font-weight: bold; white-space: nowrap; }
+  .btn.mini .ic { width: 12px; height: 12px; margin-right: 5px; }
+  .btn.mini img, .btn.mini span { cursor: pointer; }
   .acts .pill { flex: 0 1 auto; } /* a failed result: Retry, then the error, cut to fit */
   .status { margin-top: 7px; min-height: 14px; font-size: 11px; color: var(--muted); }
   .status.err { color: var(--err); }
 
   /* one line, only when the open preview is in another document (its row isn't in this document's list) */
-  .other-preview { margin-top: 8px; height: 24px; line-height: 24px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--accent);
-                   background: var(--accent-soft); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  .other-preview { display: flex; align-items: center; margin-top: 8px; height: 24px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--accent);
+                   background: var(--accent-soft); cursor: pointer; }
+  .other-preview.hidden { display: none; } /* display:flex above is later than .hidden and would win */
+  .other-preview .ic { margin-right: 7px; }
+  #otherText { flex: 1; min-width: 0; height: 24px; line-height: 24px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .other-preview img, #otherText { cursor: pointer; }
 
   /* results */
   .results-head { display: flex; align-items: center; margin-bottom: 7px; }
-  .results-head .label { margin: 0; height: 22px; line-height: 22px; }
+  .results-head .label { margin: 0; height: 22px; }
+  .results-head .label span { height: 22px; line-height: 22px; }
   .count { margin-left: 6px; width: 22px; height: 18px; line-height: 18px; text-align: center; border-radius: 9px; background: var(--card-hover); font-size: 10px; color: var(--muted); }
   .filters { display: flex; padding: 2px; border-radius: 7px; background: var(--card); border: 1px solid var(--line); }
   .filters div { height: 18px; line-height: 18px; padding: 0 8px; border-radius: 5px; font-size: 10px; color: var(--muted); }
   .filters div:hover { color: var(--text); }
   .filters div.on { background: var(--card-hover); color: var(--text); font-weight: bold; }
+  /* results filter: icon + text; the 1-4 picker beside the main button is plain numbers */
+  #filters div { display: flex; align-items: center; padding: 0 7px; }
+  #filters span { height: 18px; line-height: 18px; font-size: 10px; color: var(--muted); }
+  #filters div:hover span { color: var(--text); }
+  #filters div.on span { color: var(--text); font-weight: bold; }
+  #filters .ic { width: 11px; height: 11px; margin-right: 4px; }
+  #filters img, #filters span { cursor: pointer; }
+  .go-row .filters .ic { margin: 0 3px 0 5px; }
   .link { display: flex; align-items: center; margin-left: 8px; height: 22px; }
   .link .ic { margin-right: 4px; }
   .link span { height: 22px; line-height: 22px; font-size: 10px; color: var(--muted); }
@@ -193,8 +217,11 @@
   .thumb.pending { background: var(--accent-soft); }
   .job .txt { flex: 1; overflow: hidden; }
   .job .top { display: flex; align-items: center; height: 16px; }
-  .tag { flex: none; height: 14px; line-height: 14px; padding: 0 5px; margin-right: 6px; border-radius: 4px; font-size: 9px; font-weight: bold; letter-spacing: 0.4px; background: var(--accent-soft); color: var(--accent); }
-  .tag.edit { background: rgba(138, 108, 240, 0.18); color: var(--accent-2); }
+  .tag { flex: none; display: flex; align-items: center; height: 14px; padding: 0 5px; margin-right: 6px; border-radius: 4px; background: var(--accent-soft); }
+  .tag.edit { background: rgba(138, 108, 240, 0.18); }
+  .tag span { height: 14px; line-height: 14px; font-size: 9px; font-weight: bold; letter-spacing: 0.4px; color: var(--accent); }
+  .tag.edit span { color: var(--accent-2); }
+  .tag .ic { width: 9px; height: 9px; margin-right: 3px; }
   .job .title { flex: 1; min-width: 0; height: 16px; line-height: 16px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .time { flex: none; margin-left: 6px; height: 16px; line-height: 16px; font-size: 10px; color: var(--faint); }
   .job .bottom { display: flex; align-items: center; min-height: 16px; margin-top: 5px; }
@@ -206,8 +233,12 @@
   .pill.grey { background: var(--card-hover); color: var(--muted); }
   .bar { height: 3px; margin-top: 5px; border-radius: 2px; background: var(--line); overflow: hidden; }
   .bar div { height: 3px; background: var(--accent); background-image: linear-gradient(90deg, var(--accent), var(--accent-2)); }
-  .x { width: 22px; height: 22px; margin-left: 6px; border-radius: 11px; text-align: center; line-height: 22px; color: var(--faint); }
-  .x:hover { background: var(--card-hover); color: var(--err); }
+  .x { flex: none; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: 6px; border-radius: 11px; }
+  .x .ic { width: 10px; height: 10px; }
+  .x img { cursor: pointer; }
+  .x:hover { background: var(--card-hover); }
+  /* the state icon before a result's pill (colour by state; a live row holds blue and amber, render / refreshLive show one) */
+  .ic.pi { width: 12px; height: 12px; margin-right: 5px; }
 
   /* settings */
   .page-head { display: flex; align-items: center; padding-bottom: 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
@@ -250,7 +281,7 @@
     <div class="hint" id="modeHint"></div>
 
     <div class="card section">
-      <div class="label">PROMPT</div>
+      <div class="label"><img class="ic dk" src="icons/text.svg"><img class="ic lt" src="icons/text-light.svg"><span>PROMPT</span></div>
       <div class="preset-row">
         <sp-picker id="presetPick" size="m" placeholder="Custom prompt"><sp-menu slot="options"></sp-menu></sp-picker>
         <div class="icon-btn" id="presetNew" title="Save the current prompt as a new preset"><img class="ic dk" src="icons/plus.svg"><img class="ic lt" src="icons/plus-light.svg"></div>
@@ -259,9 +290,9 @@
       <div id="presetAdd" class="preset-add hidden">
         <sp-textfield id="presetName" placeholder="Preset name"></sp-textfield>
         <div class="row">
-          <sp-button id="presetSave" variant="cta">Save preset</sp-button>
+          <div class="btn primary std" id="presetSave"><img class="ic wh" src="icons/check-white.svg"><span>Save preset</span></div>
           <div class="sp"></div>
-          <sp-button id="presetCancel" variant="secondary">Cancel</sp-button>
+          <div class="btn ghost std" id="presetCancel"><img class="ic dk" src="icons/close.svg"><img class="ic lt" src="icons/close-light.svg"><span>Cancel</span></div>
         </div>
       </div>
       <div id="promptView" class="prompt-view" title="Click to edit"></div>
@@ -269,26 +300,27 @@
     </div>
 
     <div class="model-line" title="Model used for the next job (also the Settings pick)">
+      <img class="ic dk" src="icons/chip.svg"><img class="ic lt" src="icons/chip-light.svg">
       <span class="k">MODEL</span>
       <sp-picker id="modelQuick" size="s" quiet placeholder="Start ComfyUI to list models"><sp-menu slot="options"></sp-menu></sp-picker>
     </div>
     <div class="go go-row">
       <div class="btn primary big" id="go"><img class="ic wh" src="icons/sparkle-white.svg"><span id="goText">Clean selection</span></div>
-      <div class="filters" id="varSeg" title="Results to make per click"><div data-v="1">1</div><div data-v="2">2</div><div data-v="3">3</div><div data-v="4">4</div></div>
+      <div class="filters" id="varSeg" title="Results to make per click"><img class="ic dk" src="icons/layers.svg"><img class="ic lt" src="icons/layers-light.svg"><div data-v="1">1</div><div data-v="2">2</div><div data-v="3">3</div><div data-v="4">4</div></div>
       <input id="variations" class="hidden" value="1">
     </div>
     <div class="status" id="status"></div>
 
-    <div id="otherPreview" class="other-preview hidden" title="Go to that document to Apply or Discard it"></div>
+    <div id="otherPreview" class="other-preview hidden" title="Go to that document to Apply or Discard it"><img class="ic dk" src="icons/layers.svg"><img class="ic lt" src="icons/layers-light.svg"><span id="otherText"></span></div>
 
     <div class="section" id="results">
       <div class="results-head">
-        <div class="label">RESULTS</div><div class="count" id="count">0</div>
+        <div class="label"><img class="ic dk" src="icons/list.svg"><img class="ic lt" src="icons/list-light.svg"><span>RESULTS</span></div><div class="count" id="count">0</div>
         <div class="grow"></div>
         <div class="filters" id="filters">
-          <div data-f="all">All</div>
-          <div data-f="new">New</div>
-          <div data-f="applied">Applied</div>
+          <div data-f="all"><img class="ic dk" src="icons/grid.svg"><img class="ic lt" src="icons/grid-light.svg"><span>All</span></div>
+          <div data-f="new"><img class="ic dk" src="icons/sparkle.svg"><img class="ic lt" src="icons/sparkle-light.svg"><span>New</span></div>
+          <div data-f="applied"><img class="ic dk" src="icons/check.svg"><img class="ic lt" src="icons/check-light.svg"><span>Applied</span></div>
         </div>
         <div class="link" id="clearDone" title="Remove finished results from the list"><img class="ic dk" src="icons/trash.svg"><img class="ic lt" src="icons/trash-light.svg"><span>Clear</span></div>
       </div>
@@ -301,7 +333,7 @@
     <div class="page-head"><div class="icon" id="back" title="Back"><img class="dark-only" src="icons/back.svg"><img class="light-only" src="icons/back-light.svg"></div><div class="page-title">Settings</div></div>
 
     <div class="group card">
-      <div class="label">GENERATION</div>
+      <div class="label"><img class="ic dk" src="icons/sliders.svg"><img class="ic lt" src="icons/sliders-light.svg"><span>GENERATION</span></div>
       <div class="field"><div class="k">Model</div><sp-picker id="model" size="m" placeholder="Start ComfyUI to list files"><sp-menu slot="options"></sp-menu></sp-picker></div>
       <div class="field"><div class="k">Text encoder</div><sp-picker id="clip" size="m" placeholder="Start ComfyUI to list files"><sp-menu slot="options"></sp-menu></sp-picker></div>
       <div class="field"><div class="k">VAE</div><sp-picker id="vae" size="m" placeholder="Start ComfyUI to list files"><sp-menu slot="options"></sp-menu></sp-picker></div>
@@ -326,32 +358,32 @@
     </div>
 
     <div class="group card">
-      <div class="label">CONNECTION</div>
+      <div class="label"><img class="ic dk" src="icons/plug.svg"><img class="ic lt" src="icons/plug-light.svg"><span>CONNECTION</span></div>
       <div class="field"><div class="k">ComfyUI URL</div><sp-textfield id="url" value="http://127.0.0.1:8188"></sp-textfield></div>
       <div class="field">
         <div class="k">ComfyUI folder (to start it automatically)</div>
         <div class="pair">
           <div class="grow"><sp-textfield id="comfyDir" placeholder="ComfyUI_windows_portable folder"></sp-textfield></div>
           <div class="sp"></div>
-          <sp-button id="browseComfy" variant="secondary" style="width:auto">Browse</sp-button>
+          <div class="btn ghost std" id="browseComfy"><img class="ic dk" src="icons/folder.svg"><img class="ic lt" src="icons/folder-light.svg"><span>Browse</span></div>
         </div>
       </div>
-      <div class="field"><sp-button id="reload" variant="secondary">Test connection</sp-button></div>
+      <div class="field"><div class="btn ghost std" id="reload"><img class="ic dk" src="icons/refresh.svg"><img class="ic lt" src="icons/refresh-light.svg"><span>Test connection</span></div></div>
     </div>
 
     <div class="group card">
-      <div class="label">RESULTS</div>
+      <div class="label"><img class="ic dk" src="icons/picture.svg"><img class="ic lt" src="icons/picture-light.svg"><span>RESULTS</span></div>
       <sp-checkbox id="autoPreview" checked>Show new results right away</sp-checkbox>
       <div class="hint">Off: results wait in the list until you click them.</div>
     </div>
 
     <div class="group card">
-      <div class="label">COMPATIBILITY</div>
+      <div class="label"><img class="ic dk" src="icons/monitor.svg"><img class="ic lt" src="icons/monitor-light.svg"><span>COMPATIBILITY</span></div>
       <sp-checkbox id="legacy">Photoshop 2022 mode</sp-checkbox>
       <div class="hint">Always on in Photoshop 2022 and early 2023. Turn it on here only to test that path.</div>
     </div>
 
-    <div class="field group"><sp-button id="saveSettings" variant="cta">Save</sp-button></div>
+    <div class="field group"><div class="btn primary std" id="saveSettings"><img class="ic wh" src="icons/check-white.svg"><span>Save</span></div></div>
     <div class="status" id="saveMsg"></div>
 
     <div class="group card about">

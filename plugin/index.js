@@ -438,7 +438,7 @@ async function clean() {
       if (!edit && !job.mask) job.mask = await maskJpeg(job); // encoded once, not per variant
       for (let k = 2; k <= n; k++) {
         const id = `ps_clean_${Date.now()}_${++jobSeq}`;
-        all.push(Object.assign({}, job, { id, vn: `${k}/${n}`, pillEl: null, barEl: null, chan: job.chan && "Comfy Clean " + id.slice(9) }));
+        all.push(Object.assign({}, job, { id, vn: `${k}/${n}`, pillEl: null, barEl: null, stIcons: null, chan: job.chan && "Comfy Clean " + id.slice(9) }));
       }
       // Photoshop 2022 path: every variant owns a copy of the selection channel (removeJob deletes it with the result)
       if (job.chan) {
@@ -1006,6 +1006,29 @@ function thumbFor(job) {
   if (!img) { img = el("img", "thumb"); img.src = job.thumb; thumbs.set(job, img); }
   return img;
 }
+// Icons inside a result's row. render() rebuilds the rows, and a fresh <img> blinks empty while UXP decodes it (the
+// thumbnail did too), so each result keeps its own <img> nodes: made once, moved into every new row.
+// cls: "dk" / "lt" (theme pair, see icoPair), "wh" (white, on the accent colour), or "" (coloured file, same in both themes)
+const rowIcons = new WeakMap();
+function ico(job, file, cls = "") {
+  let own = rowIcons.get(job);
+  if (!own) rowIcons.set(job, own = new Map());
+  let i = own.get(file);
+  if (!i) { i = el("img", "ic " + cls); i.src = `icons/${file}.svg`; own.set(file, i); }
+  return i;
+}
+const icoPair = (job, name) => [ico(job, name, "dk"), ico(job, name + "-light", "lt")];
+// the state icon before the pill, by pill colour. A live row holds the blue and the amber one (refreshLive shows one),
+// so a retry turns it amber without a rebuild
+const PILL_ICON = { blue: "clock-blue", amber: "refresh-amber", green: "check-ok", red: "alert-err", grey: "undo-grey" };
+function pillIcons(job, cls) {
+  return (job.state === "ready" || job.state === "error" ? [cls] : ["blue", "amber"]).map((k) => {
+    const i = ico(job, PILL_ICON[k], "pi");
+    i.pk = k;
+    i.style.display = k === cls ? "block" : "none";
+    return i;
+  });
+}
 const pad2 = (n) => String(n).padStart(2, "0");
 // 42s, 3m 05s
 const dur = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${pad2(s % 60)}s`; };
@@ -1032,6 +1055,7 @@ function refreshLive() {
   for (const j of live) {
     const pill = pillFor(j);
     if (j.pillEl) { j.pillEl.textContent = pill.text; j.pillEl.className = "pill " + pill.cls; }
+    for (const i of j.stIcons || []) i.style.display = i.pk === pill.cls ? "block" : "none";
     if (j.barEl) j.barEl.style.width = barWidth(j);
   }
   if (!live.length) { clearInterval(ticker); ticker = null; }
@@ -1102,7 +1126,7 @@ function render() {
   const docId = activeDocId();
   const away = !!preview && preview.docId !== docId;
   $("otherPreview").className = "other-preview" + (away ? "" : " hidden");
-  if (away) $("otherPreview").textContent = `Unfinished preview in ${preview.job.docName}, click to go there`;
+  if (away) $("otherText").textContent = `Unfinished preview in ${preview.job.docName}, click to go there`; // the span: textContent on #otherPreview would delete its icon
   const mine = jobs.filter((j) => j.docId === docId);
   $("count").textContent = String(mine.length); // UXP shows nothing for the number 0
   $("sessionStats").textContent = mine.length
@@ -1127,17 +1151,21 @@ function render() {
 
     const txt = el("div", "txt");
     const top = el("div", "top");
-    top.appendChild(el("span", "tag" + (job.edit ? " edit" : ""), (job.edit ? "EDIT" : "CLEAN") + (job.vn ? " " + job.vn : "")));
+    const tag = top.appendChild(el("span", "tag" + (job.edit ? " edit" : "")));
+    tag.appendChild(ico(job, job.edit ? "pencil-violet" : "eraser-blue"));
+    tag.appendChild(el("span", "", (job.edit ? "EDIT" : "CLEAN") + (job.vn ? " " + job.vn : "")));
     top.appendChild(el("span", "title", job.prompt)); // the list only shows this document's results: no file name
     top.appendChild(el("span", "time", `${pad2(job.time.getHours())}:${pad2(job.time.getMinutes())}` + (job.took ? ` · ${dur(job.took)}` : "")));
     txt.appendChild(top);
     row.title = job.prompt;
     const bottom = el("div", "bottom");
-    if (active) bottom.appendChild(previewActions());
+    if (active) { job.stIcons = null; bottom.appendChild(previewActions(job)); }
     else {
       const pill = pillFor(job), retry = job.state === "error" && job.jpeg; // failed after the page was read
       const host = retry ? bottom.appendChild(el("div", "acts")) : bottom;
-      if (retry) actButton(host, "primary", "Retry", () => retryJob(job));
+      if (retry) actButton(host, "primary", "Retry", () => retryJob(job), [ico(job, "refresh-white", "wh")]);
+      job.stIcons = pillIcons(job, pill.cls);
+      for (const i of job.stIcons) host.appendChild(i);
       job.pillEl = host.appendChild(el("span", "pill " + pill.cls, pill.text));
     }
     txt.appendChild(bottom);
@@ -1149,7 +1177,8 @@ function render() {
     }
     row.appendChild(txt);
 
-    const x = el("div", "x", "\u2715");
+    const x = el("div", "x");
+    for (const i of icoPair(job, "close")) x.appendChild(i);
     x.title = finished(job) ? "Remove from list" : "Cancel";
     x.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1169,15 +1198,17 @@ function render() {
   }
 }
 
-function actButton(acts, cls, text, fn) {
-  const b = el("div", "btn mini " + cls, text);
+function actButton(acts, cls, text, fn, icons) {
+  const b = el("div", "btn mini " + cls);
+  for (const i of icons) b.appendChild(i);
+  b.appendChild(el("span", "", text));
   b.addEventListener("click", (e) => { e.stopPropagation(); fn().catch(fail); }); // not the row's click
   acts.appendChild(b);
 }
-function previewActions() {
+function previewActions(job) {
   const acts = el("div", "acts");
-  actButton(acts, "primary", "Apply", applyPreview);
-  actButton(acts, "ghost", "Discard", () => discardPreview(true));
+  actButton(acts, "primary", "Apply", applyPreview, [ico(job, "check-white", "wh")]);
+  actButton(acts, "ghost", "Discard", () => discardPreview(true), icoPair(job, "undo"));
   return acts;
 }
 

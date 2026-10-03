@@ -65,7 +65,7 @@ async function run(withImaging) {
   const m = new Module(PLUGIN);
   m.filename = PLUGIN;
   m.paths = Module._nodeModulePaths(path.dirname(PLUGIN));
-  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;panelShown = true; module.exports = { clean, autoPreview, showPreview, cancelJob, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, fadeEdges, shown: () => preview, needs: () => needs };", PLUGIN);
+  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;panelShown = true; module.exports = { clean, refreshLive, autoPreview, showPreview, cancelJob, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, fadeEdges, shown: () => preview, needs: () => needs };", PLUGIN);
   Module._load = load;
   const P = m.exports;
   assert.strictEqual(P.legacy(), !withImaging, "legacy() picks the path from the Imaging API");
@@ -116,6 +116,21 @@ async function run(withImaging) {
   await P.applyPreview(); // Apply -> nothing comes up, even with one waiting
   assert.strictEqual(second.outcome, "applied");
   assert.strictEqual(P.shown(), null, "Apply doesn't show the next result");
+
+  // a live result's row: its icons are made once and moved into every rebuilt row (a fresh <img> blinks), and the state
+  // icon follows the pill's colour (a retry turns it amber) without a rebuild
+  const live = { ...job, id: job.id + "L", state: "running", outcome: undefined, pid: null };
+  P.jobs.unshift(live);
+  onEvent("select");
+  const [blue, amber] = live.stIcons;
+  assert.deepStrictEqual([blue.pk, blue.style.display, amber.pk, amber.style.display], ["blue", "block", "amber", "none"], "running = blue clock");
+  onEvent("select");
+  assert.ok(live.stIcons[0] === blue && live.stIcons[1] === amber, "the row's icons are reused, not rebuilt");
+  live.state = "retrying"; P.refreshLive();
+  assert.deepStrictEqual([blue.style.display, amber.style.display], ["none", "block"], "retrying = amber refresh");
+  live.state = "error"; live.error = "x"; onEvent("select");
+  assert.deepStrictEqual(live.stIcons.map((i) => i.pk), ["red"], "a finished row has just its own state icon");
+  P.jobs.splice(P.jobs.indexOf(live), 1); onEvent("select");
 
   // double click on a result: placed once, not twice (the second preview layer stayed in the document)
   const placed = () => sent.filter((c) => (c._obj === "make" && c.using && c.using.name === "Clean preview") || c._obj === "paste").length;
@@ -186,6 +201,13 @@ for (const [, id] of fs.readFileSync(PLUGIN, "utf8").matchAll(/\$\("([\w-]+)"\)/
 // two the empty list builds in index.js
 const iconFiles = [...html.matchAll(/src="(icons\/[\w@.-]+)"/g)].map((m) => m[1]).concat(["icons/picture.svg", "icons/picture-light.svg"]);
 for (const f of iconFiles) assert.ok(fs.existsSync(path.join(__dirname, "../plugin", f)), `missing icon file ${f}`);
+// ... and the ones index.js builds for the result rows: ico(job, "file"), icoPair(job, "name") (+ "-light") and PILL_ICON
+const js = fs.readFileSync(PLUGIN, "utf8");
+for (const [, f] of js.matchAll(/\bico\(job, "([\w-]+)"/g)) iconFiles.push(`icons/${f}.svg`);
+for (const [, f] of js.matchAll(/icoPair\(job, "([\w-]+)"/g)) iconFiles.push(`icons/${f}.svg`, `icons/${f}-light.svg`);
+for (const [, f] of js.matchAll(/: "([a-z]+-(?:blue|amber|ok|err|grey))"/g)) iconFiles.push(`icons/${f}.svg`);
+for (const f of iconFiles) assert.ok(fs.existsSync(path.join(__dirname, "../plugin", f)), `missing icon file ${f}`);
+assert.ok(iconFiles.length > 60, "icons found in index.html and index.js: " + iconFiles.length);
 assert.ok(iconFiles.length > 20, "icons found in index.html: " + iconFiles.length);
 // the base rule that hides the light-theme icons must come BEFORE the light-theme media block (same specificity, the later
 // rule wins): the other way round the light icons never showed, and dark-theme screenshots can't tell

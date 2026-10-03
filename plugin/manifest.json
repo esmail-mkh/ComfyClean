@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "com.local.comfyclean",
   "name": "Comfy Clean",
-  "version": "1.4.13",
+  "version": "1.4.14",
   "main": "index.html",
   "host": {
     "app": "PS",
