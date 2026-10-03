@@ -1043,51 +1043,24 @@ function fitPrompt() {
   const h = Math.max(64, lines * 14 + 10) + "px"; // 14px lines + padding
   if (t.style.height !== h) t.style.height = h;
 }
-// panel width changes the prompt's wrapping. Only the prompt is redrawn (and only when its width changed): UXP fires
-// "resize" ~18 times a second while the panel is open, and a full render() each time rebuilt the results list
-// nonstop (~15% CPU, Apply / Discard / x replaced between press and release, so their clicks were lost)
-window.addEventListener("resize", () => { if ($("prompt").className === "hidden") showPromptView(); else fitPrompt(); });
-// The view also gets narrower without any resize event: when the main view grows past the panel height its scrollbar
-// appears and takes ~12px, and lines wrapped for the wider box lost their last letters under the edge. showPromptView
-// returns at once when width and text are unchanged, so this costs one string compare a second.
-setInterval(() => { if ($("prompt").className === "hidden" && $("promptView").offsetWidth) showPromptView(); }, 1000);
+// UXP fires "resize" ~18 times a second while the panel is open: only the textarea's height is refitted here (a full
+// render() each time rebuilt the results list nonstop, ~15% CPU, and Apply / Discard / x clicks were lost)
+window.addEventListener("resize", () => { if ($("prompt").className !== "hidden") fitPrompt(); });
 
-// UXP spaces wrapped text lines ~30px apart whatever line-height says: the view wraps the text itself into
-// fixed-height one-line rows, each a row of word boxes (.w, a fixed space between them). Line widths come from the
-// words' real widths, read from those boxes once UXP has laid them out: the first draw of new words uses a safe
-// estimate, then the view redraws with the real widths.
-const VIEW_LINES = 7; // rows that fit .prompt-view's 110px; more -> a scrollbar takes ~12px of the width
-const SPACE = 3.5; // .prompt-view .w margin-right: a Segoe UI space at 9.5pt
-const EXTRA = 1.5; // px kept per word: boxes are measured in whole px and the gap may render wider than 3.5, ~1px lost per word, so a 12-word line ran ~12px past its measured width and its last letters hid under the edge. Fixed slack (10) was not enough
-const SLACK = 10; // plus room at the edge itself, so the last letter does not touch it
-const ESTIMATE = 5.6; // px per character, a bit over the widest average seen (5.47): estimated lines never overflow
-const wordWidths = new Map(); // word -> px in the view font
-function textWidth(s) {
-  const words = s.split(" ");
-  return words.reduce((sum, w) => sum + (wordWidths.has(w) ? wordWidths.get(w) : w.length * ESTIMATE), 0) + (words.length - 1) * SPACE + words.length * EXTRA;
-}
+// UXP spaces wrapped text lines ~30px apart whatever line-height says, so the view shows each paragraph as a wrapping
+// flex row of one-word boxes (.w, 14px tall, a fixed space after each) and UXP's own layout breaks the lines. The view
+// used to break them itself from the words' offsetWidth: whole px, ~1.7px short per word, so a 12-word line ran ~20px
+// past the box and its last letters hid under the edge. Width changes (panel resize, a scrollbar) re-wrap on their own.
 function showPromptView() {
-  const box = $("promptView"), v = $("prompt").value, inner = (box.offsetWidth || 0) - 7 - SLACK || 270; // padding + border
-  if (box.shown === inner + "|" + v) return; // render() runs on every progress update: rebuilding would reset the scroll
-  box.shown = inner + "|" + v;
+  const box = $("promptView"), v = $("prompt").value;
+  if (box.shown === v) return; // render() runs on every progress update: rebuilding would reset the scroll
+  box.shown = v;
   box.innerHTML = "";
-  if (!v) return box.appendChild(el("div", "ln")).appendChild(el("div", "w ph", $("prompt").placeholder));
-  let lines = wrapLines(v, (s) => textWidth(s) <= inner);
-  if (lines.length > VIEW_LINES) lines = wrapLines(v, (s) => textWidth(s) <= inner - 12);
-  const fresh = [];
-  for (const line of lines) {
-    const row = box.appendChild(el("div", "ln"));
-    for (const w of line.split(" ")) {
-      const d = row.appendChild(el("div", "w", w || "\u00a0")); // an empty line keeps its height
-      if (w && !wordWidths.has(w)) fresh.push([w, d]);
-    }
+  if (!v) return box.appendChild(el("div", "para")).appendChild(el("div", "w ph", $("prompt").placeholder));
+  for (const para of v.split(/\r\n|\r|\n/)) { // the Windows textarea may give \r alone
+    const row = box.appendChild(el("div", "para"));
+    for (const w of para.split(" ")) row.appendChild(el("div", "w", w || "\u00a0")); // an empty line keeps its height
   }
-  if (!fresh.length || !box.offsetWidth) return;
-  setTimeout(() => {
-    let real = false;
-    for (const [w, d] of fresh) { real = real || d.offsetWidth > 0; wordWidths.set(w, d.offsetWidth || w.length * ESTIMATE); }
-    if (real) { box.shown = null; render(); } // redraw with the real widths
-  }, 50);
 }
 
 function render() {

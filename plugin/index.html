@@ -114,9 +114,10 @@
                  background: rgba(0, 0, 0, 0.18); border: 1px solid var(--line); }
   /* same look as the textarea (a native Windows box: Segoe UI 9.5pt = 12.67px, 14px lines, text 4px in), measured
      from Photoshop screenshots */
-  .prompt-view .ln { display: flex; height: 14px; overflow: hidden; }
-  /* one word: as wide as its text (showPromptView reads that width), a space after it; font set here, UXP doesn't
-     reliably pass font and line-height down to children */
+  /* one paragraph: UXP wraps its word boxes into 14px lines itself */
+  .prompt-view .para { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; }
+  /* one word: as wide as its text, a space after it; font set here, UXP doesn't reliably pass font and line-height
+     down to children */
   .prompt-view .w { flex: none; margin-right: 3.5px; height: 14px; line-height: 14px; font-family: "Segoe UI"; font-size: 12.67px; white-space: nowrap; }
   .prompt-view .ph { color: var(--faint); }
   textarea { display: block; width: 100%; height: 64px; min-height: 64px; margin: 9px 0 0; } /* UXP gave it a left margin: 7px further right than the view */
