@@ -38,7 +38,7 @@ async function run(withImaging) {
   global.fetch = () => Promise.reject(new Error("offline"));
   // a 100x200 document with a selection at 10,20 - 50,60
   const doc = withOverrides(anything(), { id: 1, width: 100, height: 200, title: "page.psd", zoom: 50 });
-  const doc2 = withOverrides(anything(), { id: 2, width: 100, height: 200, title: "page2.psd" });
+  const doc2 = withOverrides(anything(), { id: 2, width: 200, height: 200, title: "page2.psd" });
   const appState = { activeDocument: doc, documents: [doc, doc2] };
   const app = withOverrides(anything(), appState);
   let onEvent = null; // Photoshop's notification listener (document switched / closed)
@@ -47,9 +47,10 @@ async function run(withImaging) {
   let inModal = 0; // executeAsModal scopes open right now
   let readsNeedModal = false, readsBroken = false; // the Imaging API refuses to read the selection outside a modal scope / always
   let fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; // the document's selection (null = none)
+  const docSel = {}; // per document id, wins over fakeSel
   let selFill = (n) => new Uint8Array(n); // its pixels: all 0 unless a test says otherwise
   const batchPlay = async (cmds) => sent.push(...cmds) && cmds.map((c) => (c._obj === "get" && c._target[0]._property === "selection"
-    ? { selection: fakeSel ? { left: { _value: fakeSel.left }, top: { _value: fakeSel.top }, right: { _value: fakeSel.right }, bottom: { _value: fakeSel.bottom } } : {} }
+    ? { selection: (() => { const b = c._target[1] && c._target[1]._id in docSel ? docSel[c._target[1]._id] : fakeSel; return b ? { left: { _value: b.left }, top: { _value: b.top }, right: { _value: b.right }, bottom: { _value: b.bottom } } : {}; })() }
     : layerGone && c._obj === "get" && c._target[0]._property === "layerID" ? { _obj: "error", message: "The object is not currently available.", result: -25920 }
     : anything()));
   const getSelection = async ({ sourceBounds: b }) => {
@@ -214,6 +215,36 @@ async function run(withImaging) {
   assert.strictEqual(P.jobs[0].edit, false, "a manual Clean stays Clean for a full-width box");
   els.mode.value = "edit"; fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; await P.clean();
   assert.strictEqual(P.jobs[0].edit, true, "a manual Edit stays Edit for a small selection");
+  // A queue: two jobs from two selections, each keeps what it was decided as, whatever is selected after it
+  els.mode.value = "auto"; fakeSel = box; await P.clean();
+  const queuedA = P.jobs[0];
+  fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; await P.clean();
+  const queuedB = P.jobs[0];
+  fakeSel = box; await P.refreshAuto(); fakeSel = null; await P.refreshAuto();
+  assert.deepStrictEqual([queuedA.edit, queuedB.edit], [true, false], "queued jobs keep their own mode");
+  assert.ok(withImaging ? queuedA.sel && queuedB.sel && queuedA.sel !== queuedB.sel : queuedA.chan && queuedB.chan && queuedA.chan !== queuedB.chan,
+    "and their own selection (2022 path: its own channel)");
+
+  // Each document has its own selection and width: the panel follows the active tab, and the click decides per document
+  docSel[1] = box; docSel[2] = { left: 0, top: 20, right: 100, bottom: 60 }; // doc 2 is 200 wide: 100 is half of it
+  await P.refreshAuto();
+  assert.strictEqual(P.detected(), "edit", "page.psd: a full-width box");
+  appState.activeDocument = doc2; onEvent("select"); await sleep(20);
+  assert.strictEqual(P.detected(), "clean", "page2.psd is twice as wide: the same selection is only half of it, and the panel follows the tab at once");
+  await P.clean();
+  assert.strictEqual(P.jobs[0].edit, false, "and the click decides by page2.psd's width");
+  assert.strictEqual(P.jobs[0].docId, 2, "the job belongs to page2.psd");
+  docSel[2] = { left: 0, top: 20, right: 200, bottom: 60 }; await P.refreshAuto();
+  assert.strictEqual(P.detected(), "edit", "page2.psd full width");
+  appState.activeDocument = doc; onEvent("select"); await sleep(20);
+  assert.strictEqual(P.detected(), "edit", "back on page.psd: its own selection again");
+  docSel[1] = { left: 10, top: 20, right: 50, bottom: 60 }; await P.refreshAuto();
+  assert.strictEqual(P.detected(), "clean", "page.psd: a small one");
+  appState.documents = []; Object.defineProperty(appState, "activeDocument", { get() { throw new Error("No document"); }, configurable: true });
+  await P.refreshAuto();
+  assert.strictEqual(P.detected(), null, "no document open: the label goes neutral instead of keeping the last answer");
+  Object.defineProperty(appState, "activeDocument", { value: doc, writable: true, configurable: true }); appState.documents = [doc, doc2];
+  delete docSel[1]; delete docSel[2];
   P.jobs.splice(0, P.jobs.length - jobsBefore); // the jobs made here go
   els.mode.value = ""; selFill = (n) => new Uint8Array(n); fakeSel = { left: 10, top: 20, right: 50, bottom: 60 };
   onEvent("select");

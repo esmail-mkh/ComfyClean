@@ -220,7 +220,9 @@ async function refreshAuto() {
   detecting = true;
   const unstick = setTimeout(() => { detecting = false; detectKey = ""; }, 4000); // a Photoshop call that never returns must not block every later look
   try {
-    const doc = app.activeDocument, sel = doc && await selectionBounds(doc);
+    let doc = null;
+    try { doc = app.activeDocument; } catch (e) {} // no document open: nothing selected, so the label goes neutral
+    const sel = doc && await selectionBounds(doc);
     const key = sel ? [doc.id, sel.left, sel.top, sel.right, sel.bottom].join() : "none";
     if (key === detectKey) return;
     detectKey = key;
@@ -1339,6 +1341,7 @@ try {
     dropClosedDocs();
     render();
     dropGonePreview();
+    refreshAuto(); // another document's tab: its own selection and width, at once (not after the next look)
   });
 } catch (e) {} // a throw here would stop the rest of this file from loading
 
