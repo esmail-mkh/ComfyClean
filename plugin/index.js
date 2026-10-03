@@ -184,10 +184,11 @@ $("prompt").addEventListener("blur", () => {
   $("promptView").className = "prompt-view";
   render();
 });
-// Mode "auto": a rectangle across the page's full width is a Clean (the strip is the mask), a smaller selection or
-// any other shape is an Edit of that spot. Decided when the button is pressed (clean), and shown on the panel as soon
+// Mode "auto": a rectangle across the page's full width is an Edit (the whole box is regenerated from the prompt, no
+// mask); a smaller selection or any other shape is a Clean (the selection is the mask, a full-width strip around it
+// is the context). Decided when the button is pressed (clean), and shown on the panel as soon
 // as the selection changes (refreshAuto, which looks twice a second; Photoshop sends no event for a selection).
-let detected = null; // "clean" | "edit" | null (no selection yet), what auto mode would do now
+let detected = null; // "edit" | "clean" | null (no selection yet), what auto mode would do now
 let detectKey = ""; // document + selection last looked at: the pixels are read again only when it changes
 let detecting = false;
 const isEdit = () => $("mode").value === "edit" || ($("mode").value === "auto" && detected === "edit");
@@ -196,22 +197,22 @@ async function detectMode(doc, sel) {
   const tol = Math.max(2, doc.width * 0.01);
   if (sel.left > tol || sel.right < doc.width - tol) {
     detectWhy = `selection covers ${Math.round(100 * (sel.right - sel.left) / doc.width)}% of the width`;
-    return "edit";
+    return "clean";
   }
-  if (legacy()) { detectWhy = "full-width selection"; return "clean"; } // Photoshop 2022 path: the pixels aren't read here, the width alone decides
+  if (legacy()) { detectWhy = "full-width selection"; return "edit"; } // Photoshop 2022 path: the pixels aren't read here, the width alone decides
   const rect = clampRect(sel, doc);
   let px = null;
   // The Imaging API's reads may need a modal scope (every other read in this file runs in one): try without, then with.
-  // Without the pixels (both refused) a full-width selection counts as a box: better than staying undecided.
+  // Without the pixels (both refused) a full-width selection counts as a box (Edit): better than staying undecided.
   try { px = await readSelection(doc.id, rect); } catch (e) {
     try { px = await modal(() => readSelection(doc.id, rect), "Comfy Clean selection"); } catch (e2) { px = null; }
   }
-  if (!px) { detectWhy = "full-width selection"; return "clean"; }
+  if (!px) { detectWhy = "full-width selection"; return "edit"; }
   let on = 0;
   for (const v of px) if (v >= 128) on++;
-  if (on >= px.length * 0.97) { detectWhy = "a box across the full width"; return "clean"; } // 97%: a feathered edge isn't a different shape
+  if (on >= px.length * 0.97) { detectWhy = "a box across the full width"; return "edit"; } // 97%: a feathered edge isn't a different shape
   detectWhy = `full width, but only ${Math.round(100 * on / px.length)}% filled`;
-  return "edit";
+  return "clean";
 }
 async function refreshAuto() {
   // not while a page is being read or a preview placed: the selection is being moved around then
@@ -1191,7 +1192,7 @@ function render() {
   for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === mode ? "on" : "";
   $("autoText").textContent = auto && detected ? "Auto: " + (edit ? "Edit" : "Clean") : "Auto";
   $("modeHint").textContent = auto
-    ? (detected ? `Auto: ${edit ? "Edit" : "Clean"}, ${detectWhy}.` : "Auto: full-width box = Clean, anything else = Edit.")
+    ? (detected ? `Auto: ${edit ? "Edit" : "Clean"}, ${detectWhy}.` : "Auto: full-width box = Edit, anything else = Clean.")
     : edit ? "Regenerates the whole selection from the prompt."
     : "Selection is the mask. A full-width strip around it is sent as context.";
   // not #go itself: its textContent would delete the icon

@@ -173,45 +173,47 @@ async function run(withImaging) {
   assert.deepStrictEqual(live.stIcons.map((i) => i.pk), ["red"], "a finished row has just its own state icon");
   P.jobs.splice(P.jobs.indexOf(live), 1); onEvent("select");
 
-  // Auto mode (doc is 100 wide): a box across the whole width is a Clean, a smaller or other-shaped selection an Edit
+  // Auto mode (doc is 100 wide): a box across the whole width is an Edit (no mask, the box is regenerated), a smaller or
+  // other-shaped selection a Clean (the selection is the mask)
   const box = { left: 0, top: 20, right: 100, bottom: 60 }, filled = (n) => new Uint8Array(n).fill(255);
   const halfFilled = (n) => Uint8Array.from({ length: n }, (_, i) => (i < n / 2 ? 255 : 0));
   selFill = filled;
-  assert.strictEqual(await P.detectMode(doc, box), "clean", "a full-width box is a Clean");
-  assert.strictEqual(await P.detectMode(doc, { ...box, left: 1, right: 99 }), "clean", "a pixel or two short of the edges still is");
-  assert.strictEqual(await P.detectMode(doc, { ...box, right: 60 }), "edit", "a selection that stops short of the page width is an Edit");
+  assert.strictEqual(await P.detectMode(doc, box), "edit", "a full-width box is an Edit");
+  assert.strictEqual(await P.detectMode(doc, { ...box, left: 1, right: 99 }), "edit", "a pixel or two short of the edges still is");
+  assert.strictEqual(await P.detectMode(doc, { ...box, right: 60 }), "clean", "a selection that stops short of the page width is a Clean");
+  assert.strictEqual(await P.detectMode(doc, { left: 40, top: 20, right: 60, bottom: 30 }), "clean", "a small one in the middle is a Clean");
   selFill = halfFilled;
-  assert.strictEqual(await P.detectMode(doc, box), withImaging ? "edit" : "clean", "full width but not a box: an Edit (2022 path can't read pixels: width decides)");
+  assert.strictEqual(await P.detectMode(doc, box), withImaging ? "clean" : "edit", "full width but not a box: a Clean (2022 path can't read pixels: width decides)");
   selFill = filled;
   if (withImaging) { // reading the selection's pixels outside a modal scope may be refused: it is tried inside one, and if both fail the width decides
     readsNeedModal = true;
-    assert.strictEqual(await P.detectMode(doc, box), "clean", "reads refused outside a modal scope: the box is still found");
+    assert.strictEqual(await P.detectMode(doc, box), "edit", "reads refused outside a modal scope: the box is still found");
     selFill = halfFilled;
-    assert.strictEqual(await P.detectMode(doc, box), "edit", "(and its pixels were really read inside the modal scope)");
+    assert.strictEqual(await P.detectMode(doc, box), "clean", "(and its pixels were really read inside the modal scope)");
     selFill = filled; readsNeedModal = false;
     readsBroken = true;
-    assert.strictEqual(await P.detectMode(doc, box), "clean", "reads refused everywhere: a full-width selection is a Clean, not 'undecided'");
+    assert.strictEqual(await P.detectMode(doc, box), "edit", "reads refused everywhere: a full-width selection is an Edit, not 'undecided'");
     readsBroken = false;
   }
   els.mode.value = "auto";
   fakeSel = box; await P.refreshAuto();
-  assert.strictEqual(P.detected(), "clean", "the panel follows the selection");
-  assert.deepStrictEqual([els.goText.textContent, els.autoText.textContent], ["Clean selection", "Auto: Clean"], "and says what it will do");
+  assert.strictEqual(P.detected(), "edit", "the panel follows the selection");
+  assert.deepStrictEqual([els.goText.textContent, els.autoText.textContent], ["Edit selection", "Auto: Edit"], "and says what it will do");
   fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; await P.refreshAuto();
-  assert.strictEqual(P.detected(), "edit", "a new selection is looked at again");
-  assert.deepStrictEqual([els.goText.textContent, els.autoText.textContent], ["Edit selection", "Auto: Edit"]);
+  assert.strictEqual(P.detected(), "clean", "a new selection is looked at again");
+  assert.deepStrictEqual([els.goText.textContent, els.autoText.textContent], ["Clean selection", "Auto: Clean"]);
   assert.ok(/covers 40% of the width/.test(els.modeHint.textContent), "the hint says why: " + els.modeHint.textContent);
   fakeSel = null; await P.refreshAuto();
   assert.deepStrictEqual([P.detected(), els.goText.textContent, els.autoText.textContent], [null, "Clean / Edit selection", "Auto"], "no selection: neutral");
   const jobsBefore = P.jobs.length;
-  for (const [b, want] of [[box, false], [{ left: 10, top: 20, right: 50, bottom: 60 }, true]]) { // the click decides, whatever the panel shows
+  for (const [b, want] of [[box, true], [{ left: 10, top: 20, right: 50, bottom: 60 }, false]]) { // the click decides, whatever the panel shows
     fakeSel = b; await P.clean();
     assert.strictEqual(P.jobs[0].edit, want, "auto: " + (want ? "Edit" : "Clean") + " at the click");
   }
-  els.mode.value = "clean"; fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; await P.clean();
-  assert.strictEqual(P.jobs[0].edit, false, "a manual Clean stays Clean for a small selection");
-  els.mode.value = "edit"; fakeSel = box; await P.clean();
-  assert.strictEqual(P.jobs[0].edit, true, "a manual Edit stays Edit for a full-width box");
+  els.mode.value = "clean"; fakeSel = box; await P.clean();
+  assert.strictEqual(P.jobs[0].edit, false, "a manual Clean stays Clean for a full-width box");
+  els.mode.value = "edit"; fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; await P.clean();
+  assert.strictEqual(P.jobs[0].edit, true, "a manual Edit stays Edit for a small selection");
   P.jobs.splice(0, P.jobs.length - jobsBefore); // the jobs made here go
   els.mode.value = ""; selFill = (n) => new Uint8Array(n); fakeSel = { left: 10, top: 20, right: 50, bottom: 60 };
   onEvent("select");
