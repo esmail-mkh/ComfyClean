@@ -274,7 +274,14 @@ fs.getTemporaryFolder().then(async (t) => {
 
 function status(msg, err) { $("status").textContent = msg; $("status").className = "status" + (err ? " err" : ""); }
 function fail(e) { status(e.message || String(e), true); }
-function conn(ok, text) { $("dot").className = "dot " + (ok ? "ok" : "off"); $("connText").textContent = text; }
+// The header pill stays short ("Online", "Offline", "Starting..."): with the model's file name in it the pill ate the
+  // tagline's room, and the name is in the MODEL row anyway. The full text is its tooltip.
+function conn(ok, text) {
+  const starting = !ok && /^Starting/.test(text);
+  $("dot").className = starting ? "dot" : "dot " + (ok ? "ok" : "off"); // plain .dot = amber
+  $("connText").textContent = ok ? "Online" : starting ? "Starting..." : "Offline";
+  $("conn").title = text;
+}
 const baseUrl = () => val("url").replace(/\/+$/, "");
 const modal = (fn, name = "Comfy Clean") => core.executeAsModal(fn, { commandName: name });
 const play = (cmds) => action.batchPlay(cmds, {});

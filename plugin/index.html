@@ -67,8 +67,9 @@
   header { flex: none; display: flex; align-items: center; padding: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
   .logo { flex: none; width: 30px; height: 30px; margin-right: 9px; }
   .brand { height: 18px; line-height: 18px; font-size: 14px; font-weight: bold; letter-spacing: 0.2px; }
-  .tagline { height: 14px; line-height: 14px; font-size: 10px; color: var(--faint); white-space: nowrap; overflow: hidden; }
-  .conn { display: flex; align-items: center; height: 22px; line-height: 22px; padding: 0 8px; white-space: nowrap; border-radius: 11px; background: var(--card); border: 1px solid var(--line); font-size: 10px; color: var(--muted); }
+  header .grow { min-width: 0; } /* lets a long tagline shrink (with ...) instead of pushing the pill and gear */
+  .tagline { height: 14px; line-height: 14px; font-size: 10px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conn { flex: none; display: flex; align-items: center; height: 22px; line-height: 22px; margin-left: 8px; padding: 0 9px; white-space: nowrap; border-radius: 11px; background: var(--card); border: 1px solid var(--line); font-size: 10px; color: var(--muted); }
   .dot { flex: none; width: 7px; height: 7px; border-radius: 4px; margin-right: 6px; background: var(--warn); }
   .conn span { display: block; height: 20px; line-height: 20px; }
   .dot.ok { background: var(--ok); }
@@ -272,9 +273,9 @@
     <img class="logo" src="icons/plugin@2x.png">
     <div class="grow">
       <div class="brand">Comfy Clean</div>
-      <div class="tagline">AI clean &amp; edit for manhwa, powered by ComfyUI</div>
+      <div class="tagline">AI clean &amp; edit for manhwa</div>
     </div>
-    <div class="conn"><div class="dot" id="dot"></div><span id="connText">Connecting...</span></div>
+    <div class="conn" id="conn" title="Connecting to ComfyUI"><div class="dot" id="dot"></div><span id="connText">Connecting...</span></div>
     <div class="icon" id="gear" title="Settings"><img class="dark-only" src="icons/gear.svg"><img class="light-only" src="icons/gear-light.svg"></div>
   </header>
 
