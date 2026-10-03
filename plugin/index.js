@@ -1058,14 +1058,16 @@ setInterval(() => { if ($("prompt").className === "hidden" && $("promptView").of
 // estimate, then the view redraws with the real widths.
 const VIEW_LINES = 7; // rows that fit .prompt-view's 110px; more -> a scrollbar takes ~12px of the width
 const SPACE = 3.5; // .prompt-view .w margin-right: a Segoe UI space at 9.5pt
+const EXTRA = 1.5; // px kept per word: boxes are measured in whole px and the gap may render wider than 3.5, ~1px lost per word, so a 12-word line ran ~12px past its measured width and its last letters hid under the edge. Fixed slack (10) was not enough
+const SLACK = 10; // plus room at the edge itself, so the last letter does not touch it
 const ESTIMATE = 5.6; // px per character, a bit over the widest average seen (5.47): estimated lines never overflow
 const wordWidths = new Map(); // word -> px in the view font
 function textWidth(s) {
   const words = s.split(" ");
-  return words.reduce((sum, w) => sum + (wordWidths.has(w) ? wordWidths.get(w) : w.length * ESTIMATE), 0) + (words.length - 1) * SPACE;
+  return words.reduce((sum, w) => sum + (wordWidths.has(w) ? wordWidths.get(w) : w.length * ESTIMATE), 0) + (words.length - 1) * SPACE + words.length * EXTRA;
 }
 function showPromptView() {
-  const box = $("promptView"), v = $("prompt").value, inner = (box.offsetWidth || 0) - 7 || 270; // padding + border
+  const box = $("promptView"), v = $("prompt").value, inner = (box.offsetWidth || 0) - 7 - SLACK || 270; // padding + border
   if (box.shown === inner + "|" + v) return; // render() runs on every progress update: rebuilding would reset the scroll
   box.shown = inner + "|" + v;
   box.innerHTML = "";
