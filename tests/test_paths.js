@@ -44,13 +44,15 @@ async function run(withImaging) {
   let onEvent = null; // Photoshop's notification listener (document switched / closed)
   const sent = []; // every batchPlay command, newest last
   let layerGone = false; // the preview layer was undone / deleted in Photoshop
+  let fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; // the document's selection (null = none)
+  let selFill = (n) => new Uint8Array(n); // its pixels: all 0 unless a test says otherwise
   const batchPlay = async (cmds) => sent.push(...cmds) && cmds.map((c) => (c._obj === "get" && c._target[0]._property === "selection"
-    ? { selection: { left: { _value: 10 }, top: { _value: 20 }, right: { _value: 50 }, bottom: { _value: 60 } } }
+    ? { selection: fakeSel ? { left: { _value: fakeSel.left }, top: { _value: fakeSel.top }, right: { _value: fakeSel.right }, bottom: { _value: fakeSel.bottom } } : {} }
     : layerGone && c._obj === "get" && c._target[0]._property === "layerID" ? { _obj: "error", message: "The object is not currently available.", result: -25920 }
     : anything()));
   const getSelection = async ({ sourceBounds: b }) => {
     const w = b.right - b.left, h = b.bottom - b.top;
-    return { sourceBounds: b, imageData: { width: w, height: h, getData: async () => new Uint8Array(w * h), dispose() {} } };
+    return { sourceBounds: b, imageData: { width: w, height: h, getData: async () => selFill(w * h), dispose() {} } };
   };
   const ps = { app, core: { executeAsModal: (fn) => fn(anything()) }, action: { batchPlay, addNotificationListener: (evs, fn) => { onEvent = fn; } }, constants: anything(),
     imaging: withImaging ? withOverrides(anything(), { encodeImageData: async () => "AAAA", getSelection }) : undefined };
@@ -70,7 +72,7 @@ async function run(withImaging) {
   const m = new Module(PLUGIN);
   m.filename = PLUGIN;
   m.paths = Module._nodeModulePaths(path.dirname(PLUGIN));
-  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;panelShown = true; module.exports = { clean, refreshLive, autoPreview, showPreview, cancelJob, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, fadeEdges, shown: () => preview, needs: () => needs };", PLUGIN);
+  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;panelShown = true; module.exports = { clean, detectMode, refreshAuto, detected: () => detected, refreshLive, autoPreview, showPreview, cancelJob, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, fadeEdges, shown: () => preview, needs: () => needs };", PLUGIN);
   Module._load = load;
   const P = m.exports;
   assert.strictEqual(P.legacy(), !withImaging, "legacy() picks the path from the Imaging API");
@@ -167,6 +169,38 @@ async function run(withImaging) {
   live.state = "error"; live.error = "x"; onEvent("select");
   assert.deepStrictEqual(live.stIcons.map((i) => i.pk), ["red"], "a finished row has just its own state icon");
   P.jobs.splice(P.jobs.indexOf(live), 1); onEvent("select");
+
+  // Auto mode (doc is 100 wide): a box across the whole width is a Clean, a smaller or other-shaped selection an Edit
+  const box = { left: 0, top: 20, right: 100, bottom: 60 }, filled = (n) => new Uint8Array(n).fill(255);
+  const halfFilled = (n) => Uint8Array.from({ length: n }, (_, i) => (i < n / 2 ? 255 : 0));
+  selFill = filled;
+  assert.strictEqual(await P.detectMode(doc, box), "clean", "a full-width box is a Clean");
+  assert.strictEqual(await P.detectMode(doc, { ...box, left: 1, right: 99 }), "clean", "a pixel or two short of the edges still is");
+  assert.strictEqual(await P.detectMode(doc, { ...box, right: 60 }), "edit", "a selection that stops short of the page width is an Edit");
+  selFill = halfFilled;
+  assert.strictEqual(await P.detectMode(doc, box), withImaging ? "edit" : "clean", "full width but not a box: an Edit (2022 path can't read pixels: width decides)");
+  selFill = filled;
+  els.mode.value = "auto";
+  fakeSel = box; await P.refreshAuto();
+  assert.strictEqual(P.detected(), "clean", "the panel follows the selection");
+  assert.deepStrictEqual([els.goText.textContent, els.autoText.textContent], ["Clean selection", "Auto: Clean"], "and says what it will do");
+  fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; await P.refreshAuto();
+  assert.strictEqual(P.detected(), "edit", "a new selection is looked at again");
+  assert.deepStrictEqual([els.goText.textContent, els.autoText.textContent], ["Edit selection", "Auto: Edit"]);
+  fakeSel = null; await P.refreshAuto();
+  assert.deepStrictEqual([P.detected(), els.goText.textContent, els.autoText.textContent], [null, "Clean / Edit selection", "Auto"], "no selection: neutral");
+  const jobsBefore = P.jobs.length;
+  for (const [b, want] of [[box, false], [{ left: 10, top: 20, right: 50, bottom: 60 }, true]]) { // the click decides, whatever the panel shows
+    fakeSel = b; await P.clean();
+    assert.strictEqual(P.jobs[0].edit, want, "auto: " + (want ? "Edit" : "Clean") + " at the click");
+  }
+  els.mode.value = "clean"; fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; await P.clean();
+  assert.strictEqual(P.jobs[0].edit, false, "a manual Clean stays Clean for a small selection");
+  els.mode.value = "edit"; fakeSel = box; await P.clean();
+  assert.strictEqual(P.jobs[0].edit, true, "a manual Edit stays Edit for a full-width box");
+  P.jobs.splice(0, P.jobs.length - jobsBefore); // the jobs made here go
+  els.mode.value = ""; selFill = (n) => new Uint8Array(n); fakeSel = { left: 10, top: 20, right: 50, bottom: 60 };
+  onEvent("select");
 
   // double click on a result: placed once, not twice (the second preview layer stayed in the document)
   const placed = () => sent.filter((c) => (c._obj === "make" && c.using && c.using.name === "Clean preview") || c._obj === "paste").length;

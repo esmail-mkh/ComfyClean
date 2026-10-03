@@ -184,8 +184,38 @@ $("prompt").addEventListener("blur", () => {
   $("promptView").className = "prompt-view";
   render();
 });
+// Mode "auto": a rectangle across the page's full width is a Clean (the strip is the mask), a smaller selection or
+// any other shape is an Edit of that spot. Decided when the button is pressed (clean), and shown on the panel as soon
+// as the selection changes (refreshAuto, which looks twice a second; Photoshop sends no event for a selection).
+let detected = null; // "clean" | "edit" | null (no selection yet), what auto mode would do now
+let detectKey = ""; // document + selection last looked at: the pixels are read again only when it changes
+let detecting = false;
+const isEdit = () => $("mode").value === "edit" || ($("mode").value === "auto" && detected === "edit");
+async function detectMode(doc, sel) {
+  const tol = Math.max(2, doc.width * 0.01);
+  if (sel.left > tol || sel.right < doc.width - tol) return "edit";
+  if (legacy()) return "clean"; // Photoshop 2022 path: the pixels aren't read here, the width alone decides
+  const px = await readSelection(doc.id, clampRect(sel, doc));
+  let on = 0;
+  for (const v of px) if (v >= 128) on++;
+  return on >= px.length * 0.97 ? "clean" : "edit"; // 97%: a feathered edge isn't a different shape
+}
+async function refreshAuto() {
+  // not while a page is being read or a preview placed: the selection is being moved around then
+  if (!panelShown || detecting || placing || !cfgReady || $("mode").value !== "auto" || jobs.some((j) => j.state === "reading")) return;
+  detecting = true;
+  try {
+    const doc = app.activeDocument, sel = doc && await selectionBounds(doc);
+    const key = sel ? [doc.id, sel.left, sel.top, sel.right, sel.bottom].join() : "none";
+    if (key === detectKey) return;
+    detectKey = key;
+    const d = sel ? await detectMode(doc, sel) : null;
+    if (d !== detected) { detected = d; render(); }
+  } catch (e) { detectKey = ""; } finally { detecting = false; } // no document, Photoshop busy: look again next time
+}
+setInterval(refreshAuto, 600);
 for (const b of document.querySelectorAll("#modeSeg div")) {
-  b.addEventListener("click", () => { $("mode").value = b.dataset.v; save("mode"); render(); });
+  b.addEventListener("click", () => { $("mode").value = b.dataset.v; save("mode"); detectKey = ""; render(); refreshAuto(); });
 }
 for (const b of document.querySelectorAll("#varSeg div")) {
   b.addEventListener("click", () => { $("variations").value = b.dataset.v; save("variations"); render(); });
@@ -326,7 +356,7 @@ async function loadModels() {
   showAutoPicks();
   render(); // main view shows the picked model
   if (live) conn(true, val("model").replace(/\.(gguf|safetensors)$/, ""));
-  status(live ? "Make a selection, then click " + ($("mode").value === "edit" ? "Edit." : "Clean.")
+  status(live ? "Make a selection, then click " + ($("mode").value === "auto" ? "the button." : isEdit() ? "Edit." : "Clean.")
     : "ComfyUI is off: models listed from its folder. It starts on the first Clean.");
   if (install) status(`Install in ComfyUI: ${install} (links in Settings).`, true);
   else if (downloads.length) status(`This model still needs: ${downloads.map((f) => f.name).join(", ")} (download links in Settings).`, true);
@@ -417,7 +447,7 @@ async function clean() {
   const sel = await selectionBounds(doc);
   if (!sel) throw new Error("Make a selection first.");
 
-  const edit = $("mode").value === "edit";
+  const edit = $("mode").value === "edit" || ($("mode").value === "auto" && await detectMode(doc, sel) === "edit");
   const pad = +val("pad") || 0;
   showPanel();
   // Only this crop goes to ComfyUI, so page height doesn't matter.
@@ -1143,12 +1173,17 @@ function render() {
   if (!panelShown) return;
   if ($("prompt").className === "hidden") showPromptView(); else fitPrompt();
   if (!ticker && jobs.some((j) => !finished(j))) ticker = setInterval(refreshLive, 1000);
-  const edit = $("mode").value === "edit";
-  for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === $("mode").value ? "on" : "";
-  $("modeHint").textContent = edit
-    ? "Regenerates the whole selection from the prompt."
+  const mode = $("mode").value, edit = isEdit(), auto = mode === "auto";
+  for (const b of document.querySelectorAll("#modeSeg div")) b.className = b.dataset.v === mode ? "on" : "";
+  $("autoText").textContent = auto && detected ? "Auto: " + (edit ? "Edit" : "Clean") : "Auto";
+  $("modeHint").textContent = auto
+    ? (detected === "edit" ? "Auto: Edit, the selection doesn't fill the page width."
+      : detected === "clean" ? "Auto: Clean, a box across the full page width."
+      : "Auto: full-width box = Clean, anything else = Edit.")
+    : edit ? "Regenerates the whole selection from the prompt."
     : "Selection is the mask. A full-width strip around it is sent as context.";
-  $("goText").textContent = (edit ? "Edit selection" : "Clean selection"); // not #go itself: its textContent would delete the icon
+  // not #go itself: its textContent would delete the icon
+  $("goText").textContent = auto && !detected ? "Clean / Edit selection" : edit ? "Edit selection" : "Clean selection";
   for (const b of document.querySelectorAll("#varSeg div")) b.className = b.dataset.v === String(variations()) ? "on" : "";
   // the model the next job will use: the Settings pick, or the saved one while ComfyUI is offline/starting
   const model = val("model") || load("model") || "";
