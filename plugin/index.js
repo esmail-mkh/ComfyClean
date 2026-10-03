@@ -40,14 +40,18 @@ const DEFAULT_PRESETS = [
 ];
 const presets = () => cfg.presets || DEFAULT_PRESETS;
 
+// render() does nothing while the panel is closed: touching a hidden panel's DOM made its spot in the workspace
+// flicker whenever a document was closed or switched (show() renders to catch up)
+let panelShown = false;
+
 // "Clean selection" is also a Plugins-menu command, so it can get a keyboard shortcut
 uxp.entrypoints.setup({
   // from a shortcut the panel may be hidden, so problems also get an alert
   commands: { clean: () => clean().catch((e) => { fail(e); app.showAlert(e.message || String(e)); }) },
   panels: {
     main: {
-      show(node) { if (node && node !== document.body && !node.contains($("app"))) node.appendChild($("app")); rememberPanel(true); render(); }, // render: catch up on documents switched meanwhile
-      hide() { rememberPanel(false); },
+      show(node) { if (node && node !== document.body && !node.contains($("app"))) node.appendChild($("app")); panelShown = true; rememberPanel(true); render(); }, // render: catch up on documents switched meanwhile
+      hide() { panelShown = false; rememberPanel(false); },
     },
   },
 });
@@ -1085,6 +1089,7 @@ function showPromptView() {
 }
 
 function render() {
+  if (!panelShown) return;
   if ($("prompt").className === "hidden") showPromptView(); else fitPrompt();
   if (!ticker && jobs.some((j) => !finished(j))) ticker = setInterval(refreshLive, 1000);
   const edit = $("mode").value === "edit";
