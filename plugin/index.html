@@ -127,6 +127,11 @@
   .model-line { display: flex; align-items: center; height: 28px; margin-top: 10px; padding: 0 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
   .model-line .k { flex: none; height: 28px; line-height: 28px; margin-right: 8px; font-size: 9px; font-weight: bold; letter-spacing: 1px; color: var(--faint); }
   .model-line sp-picker { flex: 1; width: auto; min-width: 0; }
+  /* variants picker sits beside the main button: no extra row, so the panel keeps its height (a taller one got a scrollbar) */
+  .go-row { display: flex; align-items: center; }
+  .go-row .btn { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .go-row .filters { flex: none; margin-left: 6px; align-items: center; }
+  .go-row .filters div { height: 28px; line-height: 28px; padding: 0 5px; text-align: center; font-size: 11px; }
   .btn { height: 32px; line-height: 32px; border-radius: 9px; text-align: center; font-weight: bold; letter-spacing: 0.3px; }
   .btn.primary { color: #fff; background: var(--accent); background-image: linear-gradient(135deg, var(--accent), var(--accent-2)); }
   .btn.primary:hover { background-image: linear-gradient(135deg, #5d9bf7, #9a80f3); }
@@ -245,7 +250,11 @@
       <span class="k">MODEL</span>
       <sp-picker id="modelQuick" size="s" quiet placeholder="Start ComfyUI to list models"><sp-menu slot="options"></sp-menu></sp-picker>
     </div>
-    <div class="go"><div class="btn primary big" id="go">Clean selection</div></div>
+    <div class="go go-row">
+      <div class="btn primary big" id="go">Clean selection</div>
+      <div class="filters" id="varSeg" title="Results to make per click"><div data-v="1">1</div><div data-v="2">2</div><div data-v="3">3</div><div data-v="4">4</div></div>
+      <input id="variations" class="hidden" value="1">
+    </div>
     <div class="status" id="status"></div>
 
     <div id="otherPreview" class="other-preview hidden" title="Go to that document to Apply or Discard it"></div>

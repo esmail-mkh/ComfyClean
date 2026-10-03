@@ -4,7 +4,7 @@ const { localFileSystem: fs, formats } = uxp.storage;
 const models = require("./models.js");
 
 const $ = (id) => document.getElementById(id);
-const MAIN_FIELDS = ["mode", "prompt"]; // auto-saved as you use them
+const MAIN_FIELDS = ["mode", "prompt", "variations"]; // auto-saved as you use them
 const SETTINGS = ["pad", "stuck", "url", "comfyDir", "model", "clip", "vae", "steps", "colorMatch", "fade"]; // saved with the Save button
 const CLIENT = "ps_clean_" + Date.now();
 const SRGB = "sRGB IEC61966-2.1";
@@ -178,6 +178,10 @@ $("prompt").addEventListener("blur", () => {
 for (const b of document.querySelectorAll("#modeSeg div")) {
   b.addEventListener("click", () => { $("mode").value = b.dataset.v; save("mode"); render(); });
 }
+for (const b of document.querySelectorAll("#varSeg div")) {
+  b.addEventListener("click", () => { $("variations").value = b.dataset.v; save("variations"); render(); });
+}
+const variations = () => Math.min(4, Math.max(1, +val("variations") || 1)); // results made per click, default 1
 $("go").addEventListener("click", () => clean().catch(fail));
 // Apply / Discard live on the previewed result's row (render); a preview open in another document shows this line
 $("otherPreview").addEventListener("click", () => {
@@ -380,10 +384,12 @@ async function clean() {
   // clean: full page width, selection's height band + context above/below. edit: just the selection box.
   const rect = edit ? clampRect(sel, doc)
     : clampRect({ left: 0, right: doc.width, top: sel.top - pad, bottom: sel.bottom + pad }, doc);
+  const n = variations();
   const job = {
     id: `ps_clean_${Date.now()}_${++jobSeq}`, docId: doc.id, docName: doc.title, base: baseUrl(), time: new Date(),
     prompt: $("prompt").value.trim(), edit, rect, w: rect.right - rect.left, h: rect.bottom - rect.top, state: "reading",
     area: sel, // the selection's box: clicking the result scrolls the view to it
+    vn: n > 1 ? `1/${n}` : "", // variant number shown on the row
   };
   jobs.unshift(job);
   render();
@@ -415,7 +421,29 @@ async function clean() {
     job.error = e.message || String(e);
     return render();
   }
-  await makeResult(job);
+  // Variants: one read of the page, N results. Each is a copy of the job (own id, seed and ComfyUI run) that shares
+  // the page bytes and selection; the first stays `job`, the others sit right below it in the list.
+  const all = [job];
+  if (n > 1) {
+    try {
+      if (!edit && !job.mask) job.mask = await maskJpeg(job); // encoded once, not per variant
+      for (let k = 2; k <= n; k++) {
+        const id = `ps_clean_${Date.now()}_${++jobSeq}`;
+        all.push(Object.assign({}, job, { id, vn: `${k}/${n}`, pillEl: null, barEl: null, chan: job.chan && "Comfy Clean " + id.slice(9) }));
+      }
+      // Photoshop 2022 path: every variant owns a copy of the selection channel (removeJob deletes it with the result)
+      if (job.chan) {
+        await modal(() => play(all.slice(1).map((v) => ({ _obj: "duplicate", _target: [{ _ref: "channel", _name: job.chan }, { _ref: "document", _id: doc.id }], name: v.chan }))));
+      }
+    } catch (e) {
+      job.state = "error";
+      job.error = e.message || String(e);
+      return render();
+    }
+    jobs.splice(jobs.indexOf(job) + 1, 0, ...all.slice(1));
+    render();
+  }
+  await Promise.all(all.map(makeResult)); // makeResult catches its own errors
 }
 
 // everything after reading the page: also what Retry runs again (job.jpeg / job.mask / job.sel are kept for it)
@@ -1015,6 +1043,10 @@ function fitPrompt() {
 // "resize" ~18 times a second while the panel is open, and a full render() each time rebuilt the results list
 // nonstop (~15% CPU, Apply / Discard / x replaced between press and release, so their clicks were lost)
 window.addEventListener("resize", () => { if ($("prompt").className === "hidden") showPromptView(); else fitPrompt(); });
+// The view also gets narrower without any resize event: when the main view grows past the panel height its scrollbar
+// appears and takes ~12px, and lines wrapped for the wider box lost their last letters under the edge. showPromptView
+// returns at once when width and text are unchanged, so this costs one string compare a second.
+setInterval(() => { if ($("prompt").className === "hidden" && $("promptView").offsetWidth) showPromptView(); }, 1000);
 
 // UXP spaces wrapped text lines ~30px apart whatever line-height says: the view wraps the text itself into
 // fixed-height one-line rows, each a row of word boxes (.w, a fixed space between them). Line widths come from the
@@ -1060,7 +1092,8 @@ function render() {
   $("modeHint").textContent = edit
     ? "Regenerates the whole selection from the prompt."
     : "Selection is the mask. A full-width strip around it is sent as context.";
-  $("go").textContent = edit ? "Edit selection" : "Clean selection";
+  $("go").textContent = (edit ? "Edit selection" : "Clean selection");
+  for (const b of document.querySelectorAll("#varSeg div")) b.className = b.dataset.v === String(variations()) ? "on" : "";
   // the model the next job will use: the Settings pick, or the saved one while ComfyUI is offline/starting
   const model = val("model") || load("model") || "";
   if (val("modelQuick") !== model) setVal("modelQuick", model);
@@ -1092,7 +1125,7 @@ function render() {
 
     const txt = el("div", "txt");
     const top = el("div", "top");
-    top.appendChild(el("span", "tag" + (job.edit ? " edit" : ""), job.edit ? "EDIT" : "CLEAN"));
+    top.appendChild(el("span", "tag" + (job.edit ? " edit" : ""), (job.edit ? "EDIT" : "CLEAN") + (job.vn ? " " + job.vn : "")));
     top.appendChild(el("span", "title", job.prompt)); // the list only shows this document's results: no file name
     top.appendChild(el("span", "time", `${pad2(job.time.getHours())}:${pad2(job.time.getMinutes())}` + (job.took ? ` · ${dur(job.took)}` : "")));
     txt.appendChild(top);

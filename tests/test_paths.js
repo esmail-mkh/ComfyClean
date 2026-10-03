@@ -113,6 +113,21 @@ async function run(withImaging) {
   assert.strictEqual(second.outcome, "applied");
   assert.strictEqual(P.shown(), null, "Apply doesn't show the next result");
 
+  // Variants: 3 results from one click, sharing one read of the page; own id / seed / channel each
+  const before = P.jobs.length;
+  els.variations.value = "3";
+  await P.clean().catch((e) => { throw new Error("clean x3 threw: " + e.stack); });
+  const vs = P.jobs.slice(0, 3);
+  assert.strictEqual(P.jobs.length, before + 3, "3 results from one click");
+  assert.deepStrictEqual(vs.map((j) => j.vn), ["1/3", "2/3", "3/3"], "variant order, first on top");
+  assert.strictEqual(new Set(vs.map((j) => j.id)).size, 3, "unique ids (upload names)");
+  assert.ok(vs.every((j) => j.sel === vs[0].sel && j.jpeg === vs[0].jpeg), "page read once and shared");
+  assert.ok(vs.every((j) => /ComfyUI|not reachable|isn't running|No ComfyUI/i.test(j.error)), "each ran on its own: " + vs.map((j) => j.error));
+  if (!withImaging) assert.strictEqual(new Set(vs.map((j) => j.chan)).size, 3, "2022 path: a channel per variant");
+  els.variations.value = "1";
+  for (const j of vs) P.jobs.splice(P.jobs.indexOf(j), 1);
+  onEvent("select"); // redraw the list without them
+
   // clicking a result scrolls to its area (selection 10,20 - 50,60) at the current zoom (50%), zoom untouched
   await P.scrollToArea(job);
   const scroll = sent.filter((c) => c._obj === "set" && c._target[0]._property === "center").pop();
