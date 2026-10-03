@@ -108,7 +108,10 @@ function fillPicker(id, items) {
 const save = (f) => { cfg[f] = val(f); writeCfg().catch(fail); };
 const fillFields = (names) => { for (const f of names) if (load(f) !== null) setVal(f, load(f)); };
 
-$("version").textContent = "v" + ((uxp.versions && uxp.versions.plugin) || ""); // manifest.json "version"
+// manifest.json "version", in the footer and on the Settings page (a hand-typed number there stayed at 1.1.0)
+const VERSION = (uxp.versions && uxp.versions.plugin) || "";
+$("version").textContent = "v" + VERSION;
+$("aboutName").textContent = "Comfy Clean " + VERSION;
 
 function showSavedPicks() {
   for (const id of ["model", "clip", "vae"]) {
