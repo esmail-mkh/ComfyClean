@@ -166,12 +166,13 @@ $("prompt").addEventListener("change", () => {
   save("prompt");
 });
 $("prompt").addEventListener("input", () => render());
-$("prompt").addEventListener("keyup", fitPrompt); // Enter doesn't always fire "input" in UXP
+$("prompt").addEventListener("keyup", () => fitPrompt()); // Enter doesn't always fire "input" in UXP
 // click the prompt to edit it; leaving the box shows the scrolling view again
 $("promptView").addEventListener("click", () => {
+  const w = $("promptView").offsetWidth; // the textarea is as wide, but reads 0 until UXP has laid it out
   $("promptView").className = "prompt-view hidden";
   $("prompt").className = "";
-  fitPrompt();
+  fitPrompt(w);
   setTimeout(() => $("prompt").focus(), 0); // the textarea has to be laid out first
 });
 $("prompt").addEventListener("blur", () => {
@@ -1046,10 +1047,14 @@ function wrapLines(text, fits) {
   return out;
 }
 // ponytail: the textarea's wrap is estimated with an average glyph width (~5.3px measured, 5.5 to stay safe)
-function fitPrompt() {
-  const t = $("prompt"), per = Math.max(10, Math.floor(((t.offsetWidth || 0) - 12 || 280) / 5.5));
+// width: given on the click that shows the textarea, which reads 0 then. With 0 (and a fallback that never applied:
+// 0 - 12 is -12, not falsy) every line counted as 10 characters and the box opened ~700px tall for a moment, then
+// snapped back on the next resize event: the panel blinked. Never shorter than the view (110px): a prompt that fits
+// the view no longer makes the box shrink on click and grow back on leaving.
+function fitPrompt(width) {
+  const t = $("prompt"), per = Math.max(10, Math.floor(((width || t.offsetWidth || 292) - 12) / 5.5));
   const lines = wrapLines(t.value, (s) => s.length <= per).length + 1;
-  const h = Math.max(64, lines * 14 + 10) + "px"; // 14px lines + padding
+  const h = Math.max(110, lines * 14 + 10) + "px"; // 14px lines + padding
   if (t.style.height !== h) t.style.height = h;
 }
 // UXP fires "resize" ~18 times a second while the panel is open: only the textarea's height is refitted here (a full
