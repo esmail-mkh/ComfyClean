@@ -210,10 +210,14 @@ async function detectMode(doc, sel) {
     try { px = await modal(() => readSelection(doc.id, rect), "Comfy Clean selection"); } catch (e2) { px = null; }
   }
   if (!px) { detectWhy = "full-width selection"; return "edit"; }
-  let on = 0;
-  for (const v of px) if (v >= 128) on++;
-  if (on >= px.length * 0.97) { detectWhy = "a box across the full width"; return "edit"; } // 97%: a feathered edge isn't a different shape
-  detectWhy = `full width, but only ${Math.round(100 * on / px.length)}% filled`;
+  // Is it a solid rectangle? The share of the box that is selected, ignoring a 3 px margin: a feathered or antialiased
+  // edge is half-selected pixels (< 128), which on a thin strip were more than the 3% allowed and turned a tidy
+  // rectangle into a "Clean". Anything that really isn't a rectangle (lasso, wave, triangle, a bite out of it) stays far below.
+  const w = rect.right - rect.left, h = rect.bottom - rect.top, m = Math.min(3, Math.floor(Math.min(w, h) / 4));
+  let on = 0, total = 0;
+  for (let y = m; y < h - m; y++) for (let x = m; x < w - m; x++) { total++; if (px[y * w + x] >= 128) on++; }
+  if (on >= total * 0.97) { detectWhy = "a box across the full width"; return "edit"; }
+  detectWhy = `full width, but only ${Math.round(100 * on / total)}% filled`;
   return "clean";
 }
 async function refreshAuto() {

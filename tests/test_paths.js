@@ -57,7 +57,7 @@ async function run(withImaging) {
   const getSelection = async ({ sourceBounds: b }) => {
     if (readsBroken || (readsNeedModal && !inModal)) throw new Error("imaging.getSelection: not allowed here");
     const w = b.right - b.left, h = b.bottom - b.top;
-    return { sourceBounds: b, imageData: { width: w, height: h, getData: async () => selFill(w * h), dispose() {} } };
+    return { sourceBounds: b, imageData: { width: w, height: h, getData: async () => selFill(w * h, w, h), dispose() {} } };
   };
   const ps = { app, core: { executeAsModal: async (fn) => { inModal++; try { return await fn(anything()); } finally { inModal--; } } }, action: { batchPlay, addNotificationListener: (evs, fn) => { listeners.push({ evs, fn }); } }, constants: anything(),
     imaging: withImaging ? withOverrides(anything(), { encodeImageData: async () => "AAAA", getSelection }) : undefined };
@@ -196,6 +196,23 @@ async function run(withImaging) {
     readsBroken = true;
     assert.strictEqual(await P.detectMode(doc, box), "edit", "reads refused everywhere: a full-width selection is an Edit, not 'undecided'");
     readsBroken = false;
+  }
+  if (withImaging) { // real shapes across the full width: only a tidy rectangle is an Edit
+    const shape = (inside) => (n, w, h) => Uint8Array.from({ length: n }, (_, i) => inside(i % w, Math.floor(i / w), w, h));
+    const kinds = {
+      "a rectangle": [shape(() => 255), "edit"],
+      "a rectangle with a soft (feathered) edge": [shape((x, y, w, h) => (x < 2 || y < 2 || x >= w - 2 || y >= h - 2 ? 90 : 255)), "edit"],
+      "a triangle": [shape((x, y, w, h) => (y / h <= x / w ? 255 : 0)), "clean"],
+      "a wavy band": [shape((x, y, w, h) => (Math.abs(y - h / 2 - 0.3 * h * Math.sin((x / w) * 12.566)) < 0.12 * h ? 255 : 0)), "clean"],
+      "a scribble": [shape((x, y) => (((x * 7919 + y * 104729) % 10) < 7 ? 255 : 0)), "clean"],
+      "a rectangle with a bite out of a corner": [shape((x, y, w, h) => (x > w * 0.6 && y < h * 0.5 ? 0 : 255)), "clean"],
+      "a rectangle with a hole in it": [shape((x, y, w, h) => (Math.abs(x - w / 2) < w * 0.1 && Math.abs(y - h / 2) < h * 0.3 ? 0 : 255)), "clean"],
+    };
+    for (const [name, [fill, want]] of Object.entries(kinds)) {
+      selFill = fill;
+      assert.strictEqual(await P.detectMode(doc, box), want, `full width, ${name}: ${want}`);
+    }
+    selFill = filled;
   }
   els.mode.value = "auto";
   fakeSel = box; await P.refreshAuto();
