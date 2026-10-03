@@ -3,6 +3,7 @@
 // undefined names (ReferenceError / TypeError) that only show up when a button is clicked in Photoshop.
 const Module = require("module"), path = require("path"), assert = require("assert");
 const PLUGIN = path.join(__dirname, "../plugin/index.js");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // any property / call / await works and gives "anything" again; numbers come out as 10
 function anything() {
@@ -41,8 +42,11 @@ async function run(withImaging) {
   const app = withOverrides(anything(), appState);
   let onEvent = null; // Photoshop's notification listener (document switched / closed)
   const sent = []; // every batchPlay command, newest last
+  let layerGone = false; // the preview layer was undone / deleted in Photoshop
   const batchPlay = async (cmds) => sent.push(...cmds) && cmds.map((c) => (c._obj === "get" && c._target[0]._property === "selection"
-    ? { selection: { left: { _value: 10 }, top: { _value: 20 }, right: { _value: 50 }, bottom: { _value: 60 } } } : anything()));
+    ? { selection: { left: { _value: 10 }, top: { _value: 20 }, right: { _value: 50 }, bottom: { _value: 60 } } }
+    : layerGone && c._obj === "get" && c._target[0]._property === "layerID" ? { _obj: "error", message: "The object is not currently available.", result: -25920 }
+    : anything()));
   const getSelection = async ({ sourceBounds: b }) => {
     const w = b.right - b.left, h = b.bottom - b.top;
     return { sourceBounds: b, imageData: { width: w, height: h, getData: async () => new Uint8Array(w * h), dispose() {} } };
@@ -55,13 +59,13 @@ async function run(withImaging) {
     return require("fs").statSync(p).isDirectory() ? realFolder(p) : { read: async () => require("fs").readFileSync(p, "utf8") };
   } });
   const lfs = withOverrides(anything(), { getPluginFolder: async () => realFolder(path.dirname(PLUGIN)) });
-  const uxp = { storage: { localFileSystem: lfs, formats: anything() }, entrypoints: anything(), shell: anything() };
+  const uxp = { storage: { localFileSystem: lfs, formats: anything() }, entrypoints: anything(), shell: withOverrides(anything(), { openPath: async () => "" }) };
   const load = Module._load;
   Module._load = function (req, ...a) { return { photoshop: ps, uxp }[req] || load.call(this, req, ...a); };
   const m = new Module(PLUGIN);
   m.filename = PLUGIN;
   m.paths = Module._nodeModulePaths(path.dirname(PLUGIN));
-  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;panelShown = true; module.exports = { clean, autoPreview, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, fadeEdges, shown: () => preview, needs: () => needs };", PLUGIN);
+  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;panelShown = true; module.exports = { clean, autoPreview, showPreview, cancelJob, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, fadeEdges, shown: () => preview, needs: () => needs };", PLUGIN);
   Module._load = load;
   const P = m.exports;
   assert.strictEqual(P.legacy(), !withImaging, "legacy() picks the path from the Imaging API");
@@ -113,6 +117,17 @@ async function run(withImaging) {
   assert.strictEqual(second.outcome, "applied");
   assert.strictEqual(P.shown(), null, "Apply doesn't show the next result");
 
+  // double click on a result: placed once, not twice (the second preview layer stayed in the document)
+  const placed = () => sent.filter((c) => (c._obj === "make" && c.using && c.using.name === "Clean preview") || c._obj === "paste").length;
+  const placedBefore = placed();
+  await Promise.all([P.showPreview(third), P.showPreview(third)]);
+  assert.strictEqual(placed() - placedBefore, 1, "double click places the result once");
+  // undone with Ctrl+Z (a "select" event) or deleted by hand: the plugin forgets the preview, new results preview again
+  onEvent("select"); await sleep(0);
+  assert.strictEqual(P.shown() && P.shown().job, third, "preview kept while its layer is there");
+  layerGone = true; onEvent("select"); await sleep(0); layerGone = false;
+  assert.strictEqual(P.shown(), null, "preview forgotten once its layer is gone");
+
   // Variants: 3 results from one click, sharing one read of the page; own id / seed / channel each
   const before = P.jobs.length;
   els.variations.value = "3";
@@ -145,6 +160,17 @@ async function run(withImaging) {
   appState.documents = [doc2]; onEvent("close"); // page.psd closed
   assert.strictEqual(P.jobs.length, 0, "all of a closed document's results are dropped at once");
   assert.ok(running.cancelled, "its running job is cancelled in ComfyUI");
+
+  // Cancel while the plugin is starting ComfyUI: the job goes at once, not once ComfyUI is up (up to 3 minutes).
+  // Last: ComfyUI stays "starting" in this run from here on
+  els.comfyDir.value = "M:\\ComfyUI_windows_portable"; // ComfyUI off + its folder set = the plugin starts it
+  const cleaning = P.clean();
+  await sleep(50);
+  const waiting = P.jobs[0];
+  assert.strictEqual(waiting.state, "starting", "job waits for ComfyUI to start");
+  await P.cancelJob(waiting);
+  await Promise.race([cleaning, sleep(3000).then(() => { throw new Error("Cancel waited for ComfyUI to start"); })]);
+  assert.ok(!P.jobs.includes(waiting), "cancelled job is gone");
   console.log(`${withImaging ? "imaging" : "2022"} path ok`);
 }
 

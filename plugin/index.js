@@ -425,6 +425,7 @@ async function clean() {
     job.error = e.message || String(e);
     return render();
   }
+  if (job.cancelled) return removeJob(job); // cancelled while reading: the variant copies would inherit it and still run
   // Variants: one read of the page, N results. Each is a copy of the job (own id, seed and ComfyUI run) that shares
   // the page bytes and selection; the first stays `job`, the others sit right below it in the list.
   const all = [job];
@@ -544,7 +545,12 @@ async function ensureComfy(job) {
   if (!dir) throw new Error("ComfyUI isn't running. Start it, or set the ComfyUI folder in Settings so the plugin can start it.");
   job.state = "starting"; render();
   if (!starting) starting = startComfy(dir, job.base).finally(() => { starting = null; });
-  await starting;
+  // a cancelled job goes at once, not after ComfyUI is up (up to 3 minutes); ComfyUI keeps starting for the others
+  const run = starting;
+  for (;;) {
+    if (job.cancelled) throw new Error("Cancelled");
+    if (await Promise.race([run.then(() => true), sleep(500).then(() => false)])) return;
+  }
 }
 
 const fileExists = async (path) => {
@@ -835,8 +841,11 @@ function removeJob(job) {
 
 // ---------- preview / apply ----------
 
+// one placement at a time: two results finishing together, a double click on a result or a click while another is
+// being placed ran two at once, and the extra preview layer stayed in the document
 async function showPreview(job) {
-  placing = true; // two results finishing together must not both auto-place
+  if (placing) return;
+  placing = true;
   try { await placePreview(job); } finally { placing = false; }
 }
 
@@ -1186,10 +1195,27 @@ function dropClosedDocs() {
     removeJob(j);
   }
 }
+// The preview layer can go behind the plugin's back: undone (Ctrl+Z / the History panel are "select" events on a
+// history state), deleted or merged by hand. Kept as previewed, new results stopped previewing by themselves and
+// Apply "applied" a layer that wasn't there. Its row goes back to Ready.
+async function dropGonePreview() {
+  const p = preview;
+  if (!p || placing) return;
+  let gone;
+  try {
+    const [r] = await play([{ _obj: "get", _target: [{ _property: "layerID" }].concat(layerRef(p)) }]);
+    gone = !r || r._obj === "error";
+  } catch (e) { gone = true; }
+  if (gone && preview === p) { preview = null; render(); }
+}
 // Results follow the document tab. Checked on every event, not only "close": the close notice may arrive
 // before Photoshop has dropped the document from its list.
 try {
-  action.addNotificationListener(["select", "open", "close", "make"], () => { dropClosedDocs(); render(); });
+  action.addNotificationListener(["select", "open", "close", "make", "delete", "mergeLayersNew"], () => {
+    dropClosedDocs();
+    render();
+    dropGonePreview();
+  });
 } catch (e) {} // a throw here would stop the rest of this file from loading
 
 function stateText(job) {
