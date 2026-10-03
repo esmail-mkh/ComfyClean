@@ -23,9 +23,10 @@ function anything() {
 const withOverrides = (base, o) => new Proxy(base, { get: (t, k) => (k in o ? o[k] : t[k]) });
 
 function fakeEl() {
-  const kids = [];
+  const kids = [], on = {};
   return new Proxy({ value: "", textContent: "", className: "", dataset: {}, style: {}, selectedIndex: -1, checked: false,
-    addEventListener() {}, appendChild(c) { kids.push(c); return c; }, setAttribute() {}, getAttribute() { return null; },
+    addEventListener(type, fn) { (on[type] = on[type] || []).push(fn); }, fire: (type) => Promise.all((on[type] || []).map((fn) => fn({}))),
+    appendChild(c) { kids.push(c); return c; }, setAttribute() {}, getAttribute() { return null; },
     removeAttribute() {}, hasAttribute() { return false; }, contains() { return true; },
     querySelector() { return fakeEl(); }, querySelectorAll() { return []; } }, { set(t, k, v) { t[k] = v; return true; } });
 }
@@ -58,7 +59,11 @@ async function run(withImaging) {
     const p = path.join(dir, name);
     return require("fs").statSync(p).isDirectory() ? realFolder(p) : { read: async () => require("fs").readFileSync(p, "utf8") };
   } });
-  const lfs = withOverrides(anything(), { getPluginFolder: async () => realFolder(path.dirname(PLUGIN)) });
+  const written = {}; // file name -> last text written to the plugin's data folder (settings.json)
+  const data = { getEntry: async () => { throw new Error("no settings yet"); }, createFile: async (name) => ({ nativePath: name, write: async (txt) => { written[name] = txt; } }) };
+  let noFolders = false; // the fake disk has every folder, forever: scanning a ComfyUI folder would never end
+  const lfs = withOverrides(anything(), { getPluginFolder: async () => realFolder(path.dirname(PLUGIN)), getDataFolder: async () => data,
+    getEntryWithUrl: async () => { if (noFolders) throw new Error("no such folder"); return anything(); } });
   const uxp = { storage: { localFileSystem: lfs, formats: anything() }, entrypoints: anything(), shell: withOverrides(anything(), { openPath: async () => "" }) };
   const load = Module._load;
   Module._load = function (req, ...a) { return { photoshop: ps, uxp }[req] || load.call(this, req, ...a); };
@@ -77,6 +82,37 @@ async function run(withImaging) {
   assert.strictEqual(await P.loadModels(), true, "connected");
   assert.deepStrictEqual(P.needs().map((m) => m.name), ["Update ComfyUI", "comfyui-inpaint-nodes"]);
   assert.ok(/Install in ComfyUI: Update ComfyUI/.test(els.status.textContent), "main view says what to install: " + els.status.textContent);
+  global.fetch = () => Promise.reject(new Error("offline"));
+
+  // Settings save themselves: a change is written at once, Back saves too, models are listed again only when the
+  // ComfyUI URL / folder changed, and an empty picker never blanks a saved value
+  const saved = () => JSON.parse(written["settings.json"] || "{}");
+  await sleep(0);
+  els.pad.value = "50"; await els.pad.fire("change");
+  assert.strictEqual(saved().pad, "50", "a changed field is saved by itself");
+  assert.strictEqual(els.saveMsg.textContent, "Saved.", "and says so");
+  els.legacy.checked = true; await els.legacy.fire("change");
+  assert.strictEqual(saved().legacy, true, "a checkbox too");
+  await els.model.fire("change"); await els.clip.fire("change");
+  assert.ok(!("model" in saved()) && !("clip" in saved()), "an empty picker is not written (it would blank the saved model)");
+  let fetched = 0;
+  noFolders = true;
+  global.fetch = () => { fetched++; return Promise.reject(new Error("offline")); };
+  els.fade.value = "9"; await els.fade.fire("change");
+  assert.strictEqual(fetched, 0, "a plain setting doesn't list the models again");
+  els.url.value = "http://127.0.0.1:9999"; await els.url.fire("change");
+  assert.ok(fetched > 0 && saved().url === "http://127.0.0.1:9999", "a changed URL is saved and ComfyUI is asked again");
+  fetched = 0; await els.url.fire("change");
+  assert.strictEqual(fetched, 0, "the same URL again: models are not listed again");
+  els.comfyDir.value = "M:\\Comfy"; els.steps.value = "7"; // only typed: Back saves both
+  await els.back.fire("click");
+  assert.deepStrictEqual([saved().comfyDir, saved().steps], ["M:\\Comfy", "7"], "Back saves what was typed");
+  assert.ok(fetched > 0, "Back lists the models again after a changed folder");
+  assert.strictEqual(els.settingsView.className, "hidden", "and returns to the main view");
+  // put everything back: the rest of the run needs the defaults (no folder to start ComfyUI from, not legacy)
+  els.legacy.checked = false; await els.legacy.fire("change");
+  for (const f of ["pad", "fade", "url", "comfyDir", "steps"]) { els[f].value = ""; await els[f].fire("change"); }
+  noFolders = false;
   global.fetch = () => Promise.reject(new Error("offline"));
 
   // timing: elapsed since the click; time left from the sampler's pace (2 of 4 steps in 10s -> ~10s left)

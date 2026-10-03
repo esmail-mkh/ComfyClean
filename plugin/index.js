@@ -5,7 +5,7 @@ const models = require("./models.js");
 
 const $ = (id) => document.getElementById(id);
 const MAIN_FIELDS = ["mode", "prompt", "variations"]; // auto-saved as you use them
-const SETTINGS = ["pad", "stuck", "url", "comfyDir", "model", "clip", "vae", "steps", "colorMatch", "fade"]; // saved with the Save button
+const SETTINGS = ["pad", "stuck", "url", "comfyDir", "model", "clip", "vae", "steps", "colorMatch", "fade"]; // saved as they change (keep)
 const CLIENT = "ps_clean_" + Date.now();
 const SRGB = "sRGB IEC61966-2.1";
 // up here, not next to b64decode: if any top-level line below throws in Photoshop, consts after it stay
@@ -129,6 +129,7 @@ async function start() {
   if (cfg.panelOpen !== false) showPanel();
   fillFields(MAIN_FIELDS.concat(SETTINGS));
   fillChecks();
+  linked = link();
   showSavedPicks();
   // a picked preset is remembered by name, so an improved preset text (plugin update) shows up by itself
   const picked = presets().find((x) => x.name === cfg.presetName);
@@ -197,7 +198,7 @@ $("otherPreview").addEventListener("click", () => {
   if (d) modal(() => { app.activeDocument = d; }).catch(fail); // the document switch re-renders the list
 });
 
-// separate settings page: gear opens it, Save writes the file, Back throws edits away
+// separate settings page: gear opens it; every change is saved as it is made (keep), Back saves once more and returns
 const showSettings = (on) => {
   $("mainView").className = on ? "hidden" : "";
   $("settingsView").className = on ? "" : "hidden";
@@ -210,37 +211,55 @@ $("modelQuick").addEventListener("change", () => {
   const v = val("modelQuick");
   if (!v || v === val("model")) return;
   setVal("model", v);
-  save("model");
+  modelPicked();
+});
+function modelPicked() {
+  keep("model");
   showAutoPicks();
   render();
-  if ($("dot").className === "dot ok") conn(true, v.replace(/\.(gguf|safetensors)$/, ""));
-});
+  if ($("dot").className === "dot ok") conn(true, val("model").replace(/\.(gguf|safetensors)$/, ""));
+}
 const fillChecks = () => { $("legacy").checked = !!cfg.legacy; $("autoPreview").checked = cfg.autoPreview !== false; }; // auto preview: on unless turned off
-$("back").addEventListener("click", () => { fillFields(SETTINGS); fillChecks(); showSettings(false); });
-$("saveSettings").addEventListener("click", async () => {
-  for (const f of SETTINGS) cfg[f] = val(f);
-  cfg.legacy = !!$("legacy").checked;
-  cfg.autoPreview = !!$("autoPreview").checked;
-  try {
-    await writeCfg();
-    await loadModels();
-    showSettings(false);
-    status("Settings saved.");
-  } catch (e) {
-    $("saveMsg").textContent = e.message || String(e);
-  }
+
+// Settings save themselves. Written to settings.json, then "Saved." shows under the fields.
+// An empty picker is never written (ComfyUI off and no models listed): it would blank the saved model / encoder / VAE.
+const persist = () => (!cfgReady ? Promise.resolve() : writeCfg().then(() => { $("saveMsg").textContent = "Saved."; })
+  .catch((e) => { $("saveMsg").textContent = e.message || String(e); }));
+function keep(f) {
+  if (!PICKERS.has(f) || val(f)) cfg[f] = val(f);
+  return persist();
+}
+const keepChecks = () => { cfg.legacy = !!$("legacy").checked; cfg.autoPreview = !!$("autoPreview").checked; return persist(); };
+// ComfyUI URL / folder: the models are listed again only when one of them changed (listing walks the models folder)
+let linked = "";
+const link = () => baseUrl() + "|" + val("comfyDir").trim();
+const applyLink = () => { if (link() === linked) return Promise.resolve(); linked = link(); return testConnection(); };
+for (const f of ["pad", "stuck", "url", "comfyDir", "steps", "colorMatch", "fade"]) {
+  let t;
+  // "input" (after a pause) as well as "change": if a build doesn't send change, typed values are still saved
+  $(f).addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => keep(f), 800); });
+  $(f).addEventListener("change", () => { clearTimeout(t); return keep(f).then(() => (f === "url" || f === "comfyDir") && applyLink()); });
+}
+for (const f of ["legacy", "autoPreview"]) $(f).addEventListener("change", keepChecks);
+$("back").addEventListener("click", () => {
+  showSettings(false);
+  for (const f of SETTINGS) if (!PICKERS.has(f) || val(f)) cfg[f] = val(f);
+  return keepChecks().then(applyLink);
 });
 $("browseComfy").addEventListener("click", async () => {
   const folder = await fs.getFolder();
   if (!folder) return;
   setVal("comfyDir", folder.nativePath);
+  linked = link();
+  keep("comfyDir");
   testConnection();
 });
 const testConnection = () => loadModels()
   .then((live) => { $("saveMsg").textContent = live ? "Connected." : "ComfyUI is off. Models listed from its folder."; })
   .catch((e) => { $("saveMsg").textContent = e.message || String(e); });
 $("reload").addEventListener("click", testConnection);
-for (const f of ["model", "clip", "vae"]) $(f).addEventListener("change", () => showAutoPicks());
+$("model").addEventListener("change", modelPicked);
+for (const f of ["clip", "vae"]) $(f).addEventListener("change", () => { keep(f); showAutoPicks(); });
 start();
 // leftovers from a crash mid-place
 fs.getTemporaryFolder().then(async (t) => {
