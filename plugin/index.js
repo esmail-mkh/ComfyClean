@@ -187,10 +187,12 @@ $("prompt").addEventListener("blur", () => {
 // Mode "auto": a rectangle across the page's full width is an Edit (the whole box is regenerated from the prompt, no
 // mask); a smaller selection or any other shape is a Clean (the selection is the mask, a full-width strip around it
 // is the context). Decided when the button is pressed (clean), and shown on the panel as soon
-// as the selection changes (refreshAuto, which looks twice a second; Photoshop sends no event for a selection).
+// as the selection changes (refreshAuto: on Photoshop's "set" event, which a new selection / Deselect / Select All
+// send, and four times a second as a fallback if an event is missed).
 let detected = null; // "edit" | "clean" | null (no selection yet), what auto mode would do now
 let detectKey = ""; // document + selection last looked at: the pixels are read again only when it changes
 let detecting = false;
+let lookAgain = false; // asked to look while a look was running: the selection may have changed under it
 const isEdit = () => $("mode").value === "edit" || ($("mode").value === "auto" && detected === "edit");
 let detectWhy = ""; // the reason for the last answer, shown in the hint
 async function detectMode(doc, sel) {
@@ -216,8 +218,9 @@ async function detectMode(doc, sel) {
 }
 async function refreshAuto() {
   // not while a page is being read or a preview placed: the selection is being moved around then
-  if (!panelShown || detecting || placing || !cfgReady || $("mode").value !== "auto" || jobs.some((j) => j.state === "reading")) return;
-  detecting = true;
+  if (!panelShown || placing || !cfgReady || $("mode").value !== "auto" || jobs.some((j) => j.state === "reading")) return;
+  if (detecting) { lookAgain = true; return; }
+  detecting = true; lookAgain = false;
   const unstick = setTimeout(() => { detecting = false; detectKey = ""; }, 4000); // a Photoshop call that never returns must not block every later look
   try {
     let doc = null;
@@ -226,11 +229,14 @@ async function refreshAuto() {
     const key = sel ? [doc.id, sel.left, sel.top, sel.right, sel.bottom].join() : "none";
     if (key === detectKey) return;
     detectKey = key;
-    const d = sel ? await detectMode(doc, sel) : null;
-    if (d !== detected) { detected = d; render(); }
-  } catch (e) { detectKey = ""; } finally { clearTimeout(unstick); detecting = false; } // no document, Photoshop busy: look again next time
+    const was = detectWhy, d = sel ? await detectMode(doc, sel) : null;
+    if (d !== detected || (d && detectWhy !== was)) { detected = d; render(); } // the reason too: "covers 40%" -> "covers 60%" is still a Clean
+  } catch (e) { detectKey = ""; } finally { clearTimeout(unstick); detecting = false; if (lookAgain) setTimeout(refreshAuto, 0); } // no document, Photoshop busy: look again next time
 }
-setInterval(refreshAuto, 600);
+setInterval(refreshAuto, 250); // cheap: only the selection's box is read, the pixels only when it changed
+// "set" also fires for many other commands; refreshAuto is a no-op unless the box changed, and unlike the listener
+// below it never redraws the results list
+try { action.addNotificationListener(["set"], () => refreshAuto()); } catch (e) {}
 for (const b of document.querySelectorAll("#modeSeg div")) {
   b.addEventListener("click", () => { $("mode").value = b.dataset.v; save("mode"); detectKey = ""; render(); refreshAuto(); });
 }

@@ -41,7 +41,8 @@ async function run(withImaging) {
   const doc2 = withOverrides(anything(), { id: 2, width: 200, height: 200, title: "page2.psd" });
   const appState = { activeDocument: doc, documents: [doc, doc2] };
   const app = withOverrides(anything(), appState);
-  let onEvent = null; // Photoshop's notification listener (document switched / closed)
+  const listeners = []; // Photoshop's notification listeners: { events, callback }
+  const onEvent = (name) => listeners.filter((l) => l.evs.includes(name)).forEach((l) => l.fn()); // what Photoshop does when `name` happens
   const sent = []; // every batchPlay command, newest last
   let layerGone = false; // the preview layer was undone / deleted in Photoshop
   let inModal = 0; // executeAsModal scopes open right now
@@ -58,7 +59,7 @@ async function run(withImaging) {
     const w = b.right - b.left, h = b.bottom - b.top;
     return { sourceBounds: b, imageData: { width: w, height: h, getData: async () => selFill(w * h), dispose() {} } };
   };
-  const ps = { app, core: { executeAsModal: async (fn) => { inModal++; try { return await fn(anything()); } finally { inModal--; } } }, action: { batchPlay, addNotificationListener: (evs, fn) => { onEvent = fn; } }, constants: anything(),
+  const ps = { app, core: { executeAsModal: async (fn) => { inModal++; try { return await fn(anything()); } finally { inModal--; } } }, action: { batchPlay, addNotificationListener: (evs, fn) => { listeners.push({ evs, fn }); } }, constants: anything(),
     imaging: withImaging ? withOverrides(anything(), { encodeImageData: async () => "AAAA", getSelection }) : undefined };
   // plugin folder = the real one, so the real workflow templates are read
   const realFolder = (dir) => ({ getEntry: async (name) => {
@@ -76,7 +77,7 @@ async function run(withImaging) {
   const m = new Module(PLUGIN);
   m.filename = PLUGIN;
   m.paths = Module._nodeModulePaths(path.dirname(PLUGIN));
-  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;panelShown = true; module.exports = { clean, detectMode, refreshAuto, detected: () => detected, refreshLive, autoPreview, showPreview, cancelJob, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, fadeEdges, shown: () => preview, needs: () => needs };", PLUGIN);
+  m._compile(require("fs").readFileSync(PLUGIN, "utf8") + "\n;panelShown = true; module.exports = { stop: () => { panelShown = false; }, clean, detectMode, refreshAuto, detected: () => detected, refreshLive, autoPreview, showPreview, cancelJob, applyPreview, discardPreview, scrollToArea, loadModels, jobs, legacy, timing, fadeEdges, shown: () => preview, needs: () => needs };", PLUGIN);
   Module._load = load;
   const P = m.exports;
   assert.strictEqual(P.legacy(), !withImaging, "legacy() picks the path from the Imaging API");
@@ -200,10 +201,18 @@ async function run(withImaging) {
   fakeSel = box; await P.refreshAuto();
   assert.strictEqual(P.detected(), "edit", "the panel follows the selection");
   assert.deepStrictEqual([els.goText.textContent, els.autoText.textContent], ["Edit selection", "Auto: Edit"], "and says what it will do");
-  fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; await P.refreshAuto();
-  assert.strictEqual(P.detected(), "clean", "a new selection is looked at again");
+  fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; onEvent("set"); await sleep(20);
+  assert.strictEqual(P.detected(), "clean", "a new selection is looked at again, as soon as Photoshop says it was set");
+  fakeSel = box; const slow = P.refreshAuto(); fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; // changed while a look is running
+  await P.refreshAuto(); await slow; await sleep(20);
+  assert.strictEqual(P.detected(), "clean", "a change that comes in during a look is not lost");
+  fakeSel = box; onEvent("set"); await sleep(20);
+  assert.strictEqual(P.detected(), "edit");
+  fakeSel = { left: 10, top: 20, right: 50, bottom: 60 }; onEvent("set"); await sleep(20);
   assert.deepStrictEqual([els.goText.textContent, els.autoText.textContent], ["Clean selection", "Auto: Clean"]);
   assert.ok(/covers 40% of the width/.test(els.modeHint.textContent), "the hint says why: " + els.modeHint.textContent);
+  fakeSel = { left: 10, top: 20, right: 70, bottom: 60 }; onEvent("set"); await sleep(20);
+  assert.ok(P.detected() === "clean" && /covers 60% of the width/.test(els.modeHint.textContent), "same answer, new reason: the hint is redrawn: " + els.modeHint.textContent);
   fakeSel = null; await P.refreshAuto();
   assert.deepStrictEqual([P.detected(), els.goText.textContent, els.autoText.textContent], [null, "Clean / Edit selection", "Auto"], "no selection: neutral");
   const jobsBefore = P.jobs.length;
@@ -303,6 +312,7 @@ async function run(withImaging) {
   await P.cancelJob(waiting);
   await Promise.race([cleaning, sleep(3000).then(() => { throw new Error("Cancel waited for ComfyUI to start"); })]);
   assert.ok(!P.jobs.includes(waiting), "cancelled job is gone");
+  P.stop(); // this run's timers (auto mode looks every 250 ms) must not keep drawing into the next run's fake page
   console.log(`${withImaging ? "imaging" : "2022"} path ok`);
 }
 
