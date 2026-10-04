@@ -1,0 +1,54 @@
+# Drafts a release whenever plugin/ changes on main. The version comes from plugin/manifest.json, no tag to push.
+# Review the draft on the Releases page, then press "Publish release" (that creates the tag).
+name: Draft release
+
+on:
+  push:
+    branches: [main]
+    paths: ["plugin/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        run: echo "VERSION=$(python3 -c "import json;print(json.load(open('plugin/manifest.json'))['version'])")" >> "$GITHUB_ENV"
+
+      - name: Skip if this version is already published
+        run: |
+          state=$(gh release list --limit 100 --json tagName,isDraft --jq ".[] | select(.tagName==\"v$VERSION\") | .isDraft")
+          if [ "$state" = "false" ]; then echo "v$VERSION is already published, bump the version in plugin/manifest.json"; echo "SKIP=1" >> "$GITHUB_ENV"; fi
+          # an old draft of the same version is replaced by this run
+          if [ "$state" = "true" ]; then gh release delete "v$VERSION" --yes; fi
+
+      - name: Build ComfyClean.ccx
+        if: env.SKIP != '1'
+        run: (cd plugin && zip -qr ../ComfyClean.ccx .)
+
+      - name: Write release notes
+        if: env.SKIP != '1'
+        run: |
+          prev=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')
+          if [ -n "$prev" ]; then range="$prev..HEAD"; else range="-15"; fi
+          git log $range --no-merges --format='- %s' -- plugin > changes.txt
+          [ -s changes.txt ] || echo "- First release" > changes.txt
+          python3 - <<'PY'
+          import os
+          t = open(".github/release-notes.md", encoding="utf-8").read()
+          t = t.replace("__VERSION__", os.environ["VERSION"]).replace("__CHANGES__", open("changes.txt", encoding="utf-8").read().strip())
+          open("notes.md", "w", encoding="utf-8").write(t)
+          PY
+
+      - name: Create draft release
+        if: env.SKIP != '1'
+        run: gh release create "v$VERSION" ComfyClean.ccx --draft --target "$GITHUB_SHA" --title "Comfy Clean v$VERSION" --notes-file notes.md
