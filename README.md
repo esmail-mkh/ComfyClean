@@ -23,9 +23,9 @@ Select the text, the bubble, the SFX or the watermark → click once → get a c
 
 <br>
 
-<img src="docs/screenshot.webp" width="320" alt="Comfy Clean panel in Photoshop">
+<img src="docs/screenshot.webp" height="440" alt="Comfy Clean panel in Photoshop">&nbsp;&nbsp;&nbsp;<img src="docs/poster.webp" height="440" alt="Comfy Clean poster">
 
-<sub>🖼️ The Comfy Clean panel inside Photoshop · پنل Comfy Clean داخل فتوشاپ</sub>
+<sub>🖼️ The panel inside Photoshop and the poster · پنل داخل فتوشاپ و پوستر پروژه</sub>
 
 </div>
 
