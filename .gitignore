@@ -24,3 +24,6 @@ desktop.ini
 .DS_Store
 .vscode/
 .idea/
+
+# Claude Code project instructions (personal)
+CLAUDE.md
