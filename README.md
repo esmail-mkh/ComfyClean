@@ -23,9 +23,9 @@ Select the text, the bubble, the SFX or the watermark → click once → get a c
 
 <br>
 
-<img src="docs/screenshot.webp" height="440" alt="Comfy Clean panel in Photoshop">&nbsp;&nbsp;&nbsp;<img src="docs/poster.webp" height="440" alt="Comfy Clean poster">
+<img src="docs/screenshot.webp" width="320" alt="Comfy Clean panel in Photoshop">
 
-<sub>🖼️ The panel inside Photoshop and the poster · پنل داخل فتوشاپ و پوستر پروژه</sub>
+<sub>🖼️ The Comfy Clean panel inside Photoshop · پنل Comfy Clean داخل فتوشاپ</sub>
 
 </div>
 
@@ -34,6 +34,8 @@ Select the text, the bubble, the SFX or the watermark → click once → get a c
 <a id="english"></a>
 
 # 🇬🇧 English
+
+<p align="center"><img src="docs/poster-en.webp" width="420" alt="Comfy Clean poster"></p>
 
 > 🔒 **Everything runs on your PC.** No cloud, no subscription, no upload: your pages never leave your computer.
 
@@ -281,6 +283,8 @@ tests/              node and python checks
 <div dir="rtl" align="right">
 
 # 🇮🇷 فارسی
+
+<p align="center"><img src="docs/poster-fa.webp" width="420" alt="پوستر Comfy Clean"></p>
 
 > 🔒 **همه‌چیز روی کامپیوتر خودتان اجرا می‌شود.** بدون ابر، بدون اشتراک، بدون آپلود: صفحه‌های شما هیچ‌جا فرستاده نمی‌شوند.
 
