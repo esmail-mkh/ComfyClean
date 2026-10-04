@@ -35,7 +35,7 @@ const DEFAULT_PRESETS = [
   { name: "Text", prompt: "Remove all text and lettering. Fill where the text was with the background around it, matching its color, texture and lines. Do not change anything else." },
   { name: "Text + bubble", prompt: "Remove the speech bubble and all text in it. Restore the artwork behind it so it continues naturally from the surroundings. Do not change anything else." },
   { name: "SFX", prompt: "Remove the sound effect lettering. Restore the artwork behind it so it continues naturally from the surroundings, with the same lines, colors and screentone. Do not change anything else." },
-  { name: "Watermark", prompt: "Remove the entire watermark completely: every letter, logo, icon, outline, shadow and semi-transparent overlay, plus any box, frame or plate it sits on. Leave no faint trace, ghost, blur or smudge. Restore the artwork behind it exactly as if the watermark was never there, continuing every line, edge, color, gradient, texture and screentone from the surroundings. Do not change anything else." },
+  { name: "Watermark", prompt: "Remove the watermark or logo completely: its icon or emblem, lettering, swoosh, sparkles and glow. Fill with the background around it, continuing the artwork, lines and plain areas. Keep panel border lines straight and unbroken. Do not draw any text, symbol or emblem." },
   { name: "Object", prompt: "Remove the selected object. Fill the area with what should be behind it, matching the surroundings. Do not change anything else." },
 ];
 const presets = () => cfg.presets || DEFAULT_PRESETS;
