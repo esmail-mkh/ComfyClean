@@ -187,8 +187,9 @@ $("prompt").addEventListener("blur", () => {
 // Mode "auto": a rectangle across the page's full width is an Edit (the whole box is regenerated from the prompt, no
 // mask); a smaller selection or any other shape is a Clean (the selection is the mask, a full-width strip around it
 // is the context). Decided when the button is pressed (clean), and shown on the panel as soon
-// as the selection changes (refreshAuto: on Photoshop's "set" event, which a new selection / Deselect / Select All
-// send, and four times a second as a fallback if an event is missed).
+// as the selection changes (refreshAuto: on Photoshop's selection events). Not polled: a look is a call into Photoshop,
+// and one that lands while a tool key (J) is still down makes Photoshop take the key as held (spring-loaded tool), so
+// on release it jumped back to the previous tool. Same reason the listeners skip tool changes (toolSelect).
 let detected = null; // "edit" | "clean" | null (no selection yet), what auto mode would do now
 let detectKey = ""; // document + selection last looked at: the pixels are read again only when it changes
 let detecting = false;
@@ -225,7 +226,9 @@ async function refreshAuto() {
   if (!panelShown || placing || !cfgReady || $("mode").value !== "auto" || jobs.some((j) => j.state === "reading")) return;
   if (detecting) { lookAgain = true; return; }
   detecting = true; lookAgain = false;
-  const unstick = setTimeout(() => { detecting = false; detectKey = ""; }, 4000); // a Photoshop call that never returns must not block every later look
+  // a Photoshop call that never returns must not block every later look; detectKey stays, or a read slower than 4 s
+  // started over and over on the same selection
+  const unstick = setTimeout(() => { detecting = false; }, 4000);
   try {
     let doc = null;
     try { doc = app.activeDocument; } catch (e) {} // no document open: nothing selected, so the label goes neutral
@@ -237,10 +240,13 @@ async function refreshAuto() {
     if (d !== detected || (d && detectWhy !== was)) { detected = d; render(); } // the reason too: "covers 40%" -> "covers 60%" is still a Clean
   } catch (e) { detectKey = ""; } finally { clearTimeout(unstick); detecting = false; if (lookAgain) setTimeout(refreshAuto, 0); } // no document, Photoshop busy: look again next time
 }
-setInterval(refreshAuto, 250); // cheap: only the selection's box is read, the pixels only when it changed
-// "set" also fires for many other commands; refreshAuto is a no-op unless the box changed, and unlike the listener
+// new selection / Deselect / Select All are "set", Shift / Alt with a selection tool "addTo" / "subtractFrom" / "intersectWith".
+// These also fire for other commands; refreshAuto is a no-op unless the box changed, and unlike the listener
 // below it never redraws the results list
-try { action.addNotificationListener(["set"], () => refreshAuto()); } catch (e) {}
+try {
+  action.addNotificationListener(["set", "addTo", "subtractFrom", "intersectWith", "inverse", "feather", "expand", "contract",
+    "grow", "similar", "colorRange", "transform", "move", "clearEvent"], () => refreshAuto()); // clearEvent: leaving Quick Mask
+} catch (e) {}
 for (const b of document.querySelectorAll("#modeSeg div")) {
   b.addEventListener("click", () => { $("mode").value = b.dataset.v; save("mode"); detectKey = ""; render(); refreshAuto(); });
 }
@@ -1345,9 +1351,13 @@ async function dropGonePreview() {
   if (gone && preview === p) { preview = null; render(); }
 }
 // Results follow the document tab. Checked on every event, not only "close": the close notice may arrive
-// before Photoshop has dropped the document from its list.
+// before Photoshop has dropped the document from its list. Except a tool change ("select" of e.g. spotHealingBrushTool):
+// it changes nothing here, and any call into Photoshop while the tool key is down turns it into a spring-loaded tool
+// (back to the old tool on release, the key had to be pressed twice)
+const toolSelect = (d) => { const t = d && d._target && d._target[0]; return !!t && /Tool$/.test(t._ref || ""); };
 try {
-  action.addNotificationListener(["select", "open", "close", "make", "delete", "mergeLayersNew"], () => {
+  action.addNotificationListener(["select", "open", "close", "make", "delete", "mergeLayersNew"], (ev, d) => {
+    if (toolSelect(d)) return;
     dropClosedDocs();
     render();
     dropGonePreview();

@@ -42,7 +42,7 @@ async function run(withImaging) {
   const appState = { activeDocument: doc, documents: [doc, doc2] };
   const app = withOverrides(anything(), appState);
   const listeners = []; // Photoshop's notification listeners: { events, callback }
-  const onEvent = (name) => listeners.filter((l) => l.evs.includes(name)).forEach((l) => l.fn()); // what Photoshop does when `name` happens
+  const onEvent = (name, desc = {}) => listeners.filter((l) => l.evs.includes(name)).forEach((l) => l.fn(name, desc)); // what Photoshop does when `name` happens
   const sent = []; // every batchPlay command, newest last
   let layerGone = false; // the preview layer was undone / deleted in Photoshop
   let inModal = 0; // executeAsModal scopes open right now
@@ -229,7 +229,12 @@ async function run(withImaging) {
   assert.deepStrictEqual([els.goText.textContent, els.autoText.textContent], ["Clean selection", "Auto: Clean"]);
   assert.ok(/covers 40% of the width/.test(els.modeHint.textContent), "the hint says why: " + els.modeHint.textContent);
   fakeSel = { left: 10, top: 20, right: 70, bottom: 60 }; onEvent("set"); await sleep(20);
+  fakeSel = box; onEvent("addTo"); await sleep(20); // Shift + a selection tool: adds a second area, no "set"
+  assert.strictEqual(P.detected(), "edit", "an area added to the selection is looked at too");
+  fakeSel = { left: 10, top: 20, right: 70, bottom: 60 }; onEvent("subtractFrom"); await sleep(20);
   assert.ok(P.detected() === "clean" && /covers 60% of the width/.test(els.modeHint.textContent), "same answer, new reason: the hint is redrawn: " + els.modeHint.textContent);
+  const calls = sent.length; fakeSel = box; onEvent("select", { _target: [{ _ref: "spotHealingBrushTool" }] }); await sleep(20);
+  assert.strictEqual(sent.length, calls, "a tool change makes no call into Photoshop (the tool key would turn spring-loaded)");
   fakeSel = null; await P.refreshAuto();
   assert.deepStrictEqual([P.detected(), els.goText.textContent, els.autoText.textContent], [null, "Clean / Edit selection", "Auto"], "no selection: neutral");
   const jobsBefore = P.jobs.length;
@@ -329,7 +334,7 @@ async function run(withImaging) {
   await P.cancelJob(waiting);
   await Promise.race([cleaning, sleep(3000).then(() => { throw new Error("Cancel waited for ComfyUI to start"); })]);
   assert.ok(!P.jobs.includes(waiting), "cancelled job is gone");
-  P.stop(); // this run's timers (auto mode looks every 250 ms) must not keep drawing into the next run's fake page
+  P.stop(); // this run's timers (the ComfyUI poll) must not keep drawing into the next run's fake page
   console.log(`${withImaging ? "imaging" : "2022"} path ok`);
 }
 
