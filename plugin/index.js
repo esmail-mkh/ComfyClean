@@ -266,6 +266,7 @@ const showSettings = (on) => {
   $("mainView").className = on ? "hidden" : "";
   $("settingsView").className = on ? "" : "hidden";
   $("saveMsg").textContent = "";
+  $("savedTag").className = "saved hidden";
   render(); // model row follows the Settings pick
 };
 $("gear").addEventListener("click", () => showSettings(true));
@@ -287,7 +288,9 @@ const fillChecks = () => { $("legacy").checked = !!cfg.legacy; $("autoPreview").
 // Settings save themselves. Written to settings.json, then "Saved" shows in the footer for a moment (flashSaved).
 // An empty picker is never written (ComfyUI off and no models listed): it would blank the saved model / encoder / VAE.
 let savedTimer;
+// only on the Settings page: the main view also saves (model pick, Back, pickers refilled on open) but needs no tag
 function flashSaved() {
+  if ($("settingsView").className === "hidden") return;
   $("savedTag").className = "saved";
   clearTimeout(savedTimer);
   savedTimer = setTimeout(() => { $("savedTag").className = "saved hidden"; }, 1800);
